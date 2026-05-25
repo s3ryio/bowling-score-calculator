@@ -141,25 +141,14 @@ drop policy if exists "member_select_own_groups" on public.friend_group_members;
 create policy "member_select_own_groups"
   on public.friend_group_members for select
   to authenticated
-  using (
-    user_id = auth.uid()
-    or exists (
-      select 1 from public.friend_groups g
-      where g.id = friend_group_members.group_id and g.owner_id = auth.uid()
-    )
-  );
+  using (user_id = auth.uid());
 
 drop policy if exists "member_insert_self_or_owner" on public.friend_group_members;
-create policy "member_insert_self_or_owner"
+drop policy if exists "member_insert_self" on public.friend_group_members;
+create policy "member_insert_self"
   on public.friend_group_members for insert
   to authenticated
-  with check (
-    user_id = auth.uid()
-    or exists (
-      select 1 from public.friend_groups g
-      where g.id = friend_group_members.group_id and g.owner_id = auth.uid()
-    )
-  );
+  with check (user_id = auth.uid());
 
 drop policy if exists "invites_select_authenticated_unused" on public.invites;
 create policy "invites_select_authenticated_unused"
