@@ -137,7 +137,16 @@ function assertUsername(username: string): string {
   return sanitized;
 }
 
-function throwSupabaseError(error: { message: string } | null): void {
+interface SupabaseServiceError {
+  message: string;
+  name?: string;
+}
+
+function isMissingAuthSessionError(error: SupabaseServiceError | null): boolean {
+  return error?.name === "AuthSessionMissingError" || error?.message === "Auth session missing!";
+}
+
+function throwSupabaseError(error: SupabaseServiceError | null): void {
   if (error) {
     throw new Error(error.message);
   }
@@ -145,6 +154,9 @@ function throwSupabaseError(error: { message: string } | null): void {
 
 export async function getCurrentOnlineUser(client: SupabaseClient): Promise<User | null> {
   const { data, error } = await client.auth.getUser();
+  if (isMissingAuthSessionError(error)) {
+    return null;
+  }
   throwSupabaseError(error);
   return data.user ?? null;
 }
