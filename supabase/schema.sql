@@ -127,7 +127,7 @@ create policy "group_select_members"
     owner_id = auth.uid()
     or exists (
       select 1 from public.friend_group_members m
-      where m.group_id = id and m.user_id = auth.uid()
+      where m.group_id = friend_groups.id and m.user_id = auth.uid()
     )
   );
 
@@ -145,7 +145,7 @@ create policy "member_select_own_groups"
     user_id = auth.uid()
     or exists (
       select 1 from public.friend_groups g
-      where g.id = group_id and g.owner_id = auth.uid()
+      where g.id = friend_group_members.group_id and g.owner_id = auth.uid()
     )
   );
 
@@ -157,7 +157,7 @@ create policy "member_insert_self_or_owner"
     user_id = auth.uid()
     or exists (
       select 1 from public.friend_groups g
-      where g.id = group_id and g.owner_id = auth.uid()
+      where g.id = friend_group_members.group_id and g.owner_id = auth.uid()
     )
   );
 
@@ -179,7 +179,7 @@ create policy "invites_insert_group_member"
     created_by = auth.uid()
     and exists (
       select 1 from public.friend_group_members m
-      where m.group_id = group_id and m.user_id = auth.uid()
+      where m.group_id = invites.group_id and m.user_id = auth.uid()
     )
   );
 
@@ -197,7 +197,7 @@ create policy "seasons_select_group_members"
   using (
     exists (
       select 1 from public.friend_group_members m
-      where m.group_id = group_id and m.user_id = auth.uid()
+      where m.group_id = seasons.group_id and m.user_id = auth.uid()
     )
   );
 
@@ -208,7 +208,7 @@ create policy "seasons_insert_group_members"
   with check (
     exists (
       select 1 from public.friend_group_members m
-      where m.group_id = group_id and m.user_id = auth.uid()
+      where m.group_id = seasons.group_id and m.user_id = auth.uid()
     )
   );
 
@@ -220,7 +220,7 @@ create policy "games_select_owner_or_group"
     owner_id = auth.uid()
     or exists (
       select 1 from public.friend_group_members m
-      where m.group_id = group_id and m.user_id = auth.uid()
+      where m.group_id = games.group_id and m.user_id = auth.uid()
     )
   );
 
