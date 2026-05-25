@@ -2,10 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SetStateAction } from "react";
-import { BarChart3, Gamepad2, History, Keyboard, ShieldCheck, Swords } from "lucide-react";
+import { BarChart3, Calculator, Gamepad2, History, Keyboard, ShieldCheck, Swords } from "lucide-react";
 
 import { AchievementsPanel } from "@/components/AchievementsPanel";
 import { BowlingScoreboardTable } from "@/components/BowlingScoreboardTable";
+import { BowlingGame3D } from "@/components/BowlingGame3D";
 import { GameOverPanel } from "@/components/GameOverPanel";
 import { GameSummary } from "@/components/GameSummary";
 import { HandicapPanel } from "@/components/HandicapPanel";
@@ -67,24 +68,24 @@ const TOURNAMENTS_KEY = "bowling-score-calculator-tournaments";
 const EMPTY_HISTORY: SavedGame[] = [];
 const EMPTY_TOURNAMENTS: Tournament[] = [];
 
-type ActivePanel = "game" | "history" | "stats" | "tournaments" | "club";
+type ActivePanel = "game" | "calculator" | "history" | "stats" | "tournaments" | "club";
 
 interface PanelEntry {
   id: ActivePanel;
   label: string;
   icon: typeof Gamepad2;
   mobileOnly?: boolean;
+  shortLabel?: string;
 }
 
 const panels: PanelEntry[] = [
-  { id: "game", label: "Partida", icon: Gamepad2, mobileOnly: true },
-  { id: "history", label: "Historial", icon: History },
+  { id: "game", label: "Juego", icon: Gamepad2 },
+  { id: "calculator", label: "Calculadora", shortLabel: "Calc", icon: Calculator },
+  { id: "history", label: "Historial", shortLabel: "Hist.", icon: History },
   { id: "stats", label: "Stats", icon: BarChart3 },
-  { id: "tournaments", label: "Torneo", icon: Swords },
+  { id: "tournaments", label: "Torneo", shortLabel: "Liga", icon: Swords },
   { id: "club", label: "Club", icon: ShieldCheck },
 ];
-
-const desktopPanels = panels.filter((panel) => !panel.mobileOnly);
 
 export function Scoreboard() {
   const initialGame = useMemo(() => createGame(1), []);
@@ -142,7 +143,7 @@ export function Scoreboard() {
 
   function roll(pins: number) {
     setError(null);
-    setActivePanel("game");
+    setActivePanel("calculator");
     setGame((currentGame) => {
       const currentPlayer = currentGame.players[currentGame.activePlayerIndex];
       const before = calculateGameScore(currentPlayer.rolls);
@@ -274,7 +275,7 @@ export function Scoreboard() {
   function startNewGame() {
     setError(null);
     setSelectedGame(null);
-    setActivePanel("game");
+    setActivePanel("calculator");
     setGame((currentGame) => recomputeHandicaps(restartGameWithPlayers(currentGame)));
   }
 
@@ -359,24 +360,18 @@ export function Scoreboard() {
     updatePlayerCount(playerCount - 1);
   }
 
-  // Play area: en móvil, solo visible cuando la pestaña activa es "game".
-  // En desktop, siempre visible arriba.
-  function playAreaClass(): string {
-    return activePanel === "game" ? "space-y-4" : "hidden lg:block lg:space-y-4";
-  }
-
   // Tab content: visible solo cuando coincide con la pestaña activa (en móvil y desktop).
   function tabContentClass(panel: ActivePanel, extra = ""): string {
     return activePanel === panel ? `block ${extra}` : "hidden";
   }
 
-  const shortcutEnabled = activePanel === "game" && !finished && !shortcutsOpen;
+  const shortcutEnabled = activePanel === "calculator" && !finished && !shortcutsOpen;
   const allowedRolls = useMemo(() => new Set(activeScore.nextRollOptions), [activeScore.nextRollOptions]);
   const currentFrame = activeScore.frames[activeScore.currentFrameIndex];
   const canShortcutSpare = !finished && (currentFrame?.rolls.length ?? 0) > 0;
 
   useKeyboardShortcuts({
-    enabled: activePanel === "game",
+    enabled: activePanel === "calculator",
     onRoll: (pins) => {
       if (!shortcutEnabled) {
         return;
@@ -466,8 +461,42 @@ export function Scoreboard() {
           />
         </div>
         <main className="space-y-6" id="main-content">
-          {/* Play area — siempre visible en desktop, solo en móvil si la pestaña activa es "game" */}
-          <div className={playAreaClass()}>
+          <nav
+            aria-label="Secciones principales"
+            className="hidden lg:flex lg:flex-wrap lg:items-center lg:gap-1 lg:rounded-lg lg:border lg:border-white/10 lg:bg-white/[0.045] lg:p-1"
+            role="tablist"
+          >
+            {panels.map((panel) => {
+              const Icon = panel.icon;
+              const isActive = activePanel === panel.id;
+              return (
+                <button
+                  aria-controls={`tab-${panel.id}`}
+                  aria-selected={isActive}
+                  className={[
+                    "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-bold transition",
+                    isActive
+                      ? "bg-cyan-300 text-black"
+                      : "text-white/60 hover:bg-white/10 hover:text-white",
+                  ].join(" ")}
+                  key={panel.id}
+                  onClick={() => setActivePanel(panel.id)}
+                  role="tab"
+                  type="button"
+                >
+                  <Icon aria-hidden="true" size={16} />
+                  {panel.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Tab content — full width */}
+          <div className={tabContentClass("game")} id="tab-game" role="tabpanel">
+            <BowlingGame3D />
+          </div>
+
+          <div className={tabContentClass("calculator", "space-y-4")} id="tab-calculator" role="tabpanel">
             <GameSummary bestScore={stats.bestScore} game={game} onSave={saveGame} />
 
             <BowlingScoreboardTable
@@ -512,38 +541,6 @@ export function Scoreboard() {
             </div>
           </div>
 
-          {/* Tab bar — solo visible en desktop, justo encima del contenido de las pestañas */}
-          <nav
-            aria-label="Secciones secundarias"
-            className="hidden lg:flex lg:flex-wrap lg:items-center lg:gap-1 lg:rounded-lg lg:border lg:border-white/10 lg:bg-white/[0.045] lg:p-1"
-            role="tablist"
-          >
-            {desktopPanels.map((panel) => {
-              const Icon = panel.icon;
-              const isActive = activePanel === panel.id;
-              return (
-                <button
-                  aria-controls={`tab-${panel.id}`}
-                  aria-selected={isActive}
-                  className={[
-                    "inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-bold transition",
-                    isActive
-                      ? "bg-cyan-300 text-black"
-                      : "text-white/60 hover:bg-white/10 hover:text-white",
-                  ].join(" ")}
-                  key={panel.id}
-                  onClick={() => setActivePanel(panel.id)}
-                  role="tab"
-                  type="button"
-                >
-                  <Icon aria-hidden="true" size={16} />
-                  {panel.label}
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Tab content — full width */}
           <div className={tabContentClass("history")} id="tab-history" role="tabpanel">
             <HistoryPanel
               history={profileHistory}
@@ -585,12 +582,11 @@ export function Scoreboard() {
           </div>
         </main>
 
-        {/* Bottom nav — solo móvil. Incluye Partida (que en desktop está siempre arriba). */}
-        <nav
-          aria-label="Secciones de la app"
-          className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-5 gap-1 rounded-lg border border-white/10 bg-slate-950/90 p-1 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl lg:hidden"
-          role="tablist"
-        >
+          <nav
+            aria-label="Secciones de la app"
+            className="fixed inset-x-3 bottom-3 z-50 grid grid-cols-6 gap-1 rounded-lg border border-white/10 bg-slate-950/90 p-1 shadow-[0_20px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl lg:hidden"
+            role="tablist"
+          >
           {panels.map((panel) => {
             const Icon = panel.icon;
             const isActive = activePanel === panel.id;
@@ -601,7 +597,7 @@ export function Scoreboard() {
                 aria-current={isActive ? "page" : undefined}
                 aria-selected={isActive}
                 className={[
-                  "flex h-14 flex-col items-center justify-center gap-1 rounded-md text-xs font-bold transition",
+                  "flex h-14 flex-col items-center justify-center gap-1 rounded-md text-[11px] font-bold transition",
                   isActive ? "bg-cyan-300 text-black" : "text-white/55 hover:bg-white/10 hover:text-white",
                 ].join(" ")}
                 key={panel.id}
@@ -610,7 +606,7 @@ export function Scoreboard() {
                 type="button"
               >
                 <Icon aria-hidden="true" size={18} />
-                {panel.label}
+                {panel.shortLabel ?? panel.label}
               </button>
             );
           })}

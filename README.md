@@ -22,6 +22,7 @@ Aplicación web moderna para calcular puntuaciones oficiales de bowling en parti
 - Estadísticas: mejor puntuación, media, partidas, strikes, spares y porcentajes.
 - Estadísticas avanzadas por jugador y forma reciente.
 - Torneos locales todos contra todos con clasificación.
+- Juego 3D inicial con pista procedural, bola, pinos físicos y tiro por drag/swipe.
 - Club online con Supabase: perfiles, ranking de amigos, temporadas e invitaciones.
 - Sincronización manual del historial local hacia el ranking online.
 - Sección educativa “Cómo se puntúa”.
@@ -94,6 +95,14 @@ La capa online vive en:
 - [lib/online/supabase-client.ts](/Users/seryio/Desktop/Bowling/lib/online/supabase-client.ts)
 - [lib/online/supabase-service.ts](/Users/seryio/Desktop/Bowling/lib/online/supabase-service.ts)
 - [lib/online/online-utils.ts](/Users/seryio/Desktop/Bowling/lib/online/online-utils.ts)
+
+## Juego 3D
+
+La V7 introduce la base del producto principal: un juego de bowling 3D realista desde la foul line. La escena vive en [components/BowlingGame3D.tsx](/Users/seryio/Desktop/Bowling/components/BowlingGame3D.tsx), usa Three.js para renderizar la pista y Rapier para físicas rígidas de bola y pinos.
+
+La primera versión se centra en una pista procedural bien controlada: madera, gutters, foul line, bola brillante, pinos con colisiones y un tiro jugable por drag/swipe. La lógica pura de geometría del rack y lectura del gesto vive en [lib/game/bowling-simulation.ts](/Users/seryio/Desktop/Bowling/lib/game/bowling-simulation.ts), con tests en [tests/bowling-simulation.test.ts](/Users/seryio/Desktop/Bowling/tests/bowling-simulation.test.ts).
+
+La calculadora manual queda como herramienta extra para partidas reales presenciales. El ranking online debe alimentarse de partidas generadas por el juego, no de resultados introducidos manualmente.
 
 Modelo online:
 
