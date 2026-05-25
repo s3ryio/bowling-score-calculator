@@ -196,7 +196,7 @@ export function attachTournamentOwner(tournament: Tournament, ownerId: string | 
   return ownerId ? { ...tournament, ownerId } : tournament;
 }
 
-export function getAccountTournaments(
+export function getProfileTournaments(
   tournaments: Tournament[],
   ownerId: string | null,
 ): Tournament[] {

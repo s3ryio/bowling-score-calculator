@@ -88,20 +88,6 @@ export interface BowlingStats {
   recentGames: SavedGame[];
 }
 
-export interface UserAccount {
-  id: string;
-  name: string;
-  email: string;
-  passwordHash: string;
-  createdAt: string;
-  lastLoginAt: string;
-}
-
-export interface AuthSession {
-  userId: string;
-  startedAt: string;
-}
-
 export interface TournamentFixture {
   id: string;
   playerA: string;

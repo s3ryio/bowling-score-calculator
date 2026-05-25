@@ -229,8 +229,8 @@ export function renamePlayer(game: BowlingGame, playerId: string, name: string):
   };
 }
 
-export function syncPrimaryPlayerName(game: BowlingGame, accountName: string | null | undefined): BowlingGame {
-  const cleanName = accountName?.trim();
+export function syncPrimaryPlayerName(game: BowlingGame, profileName: string | null | undefined): BowlingGame {
+  const cleanName = profileName?.trim();
   const firstPlayer = game.players[0];
 
   if (!cleanName || !firstPlayer || firstPlayer.name === cleanName) {

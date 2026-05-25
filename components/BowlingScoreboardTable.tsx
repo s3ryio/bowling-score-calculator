@@ -219,7 +219,7 @@ function PlayerNameInput({ value, isActive, isLocked, isWinner, onChange }: Play
         maxLength={24}
         onChange={(event) => onChange(event.target.value)}
         placeholder="Jugador"
-        title={isLocked ? "Este nombre viene de tu cuenta local" : undefined}
+        title={isLocked ? "Este nombre viene de tu cuenta online" : undefined}
         value={value}
       />
     </div>

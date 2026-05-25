@@ -51,7 +51,7 @@ describe("bowling game state", () => {
     expect(renamePlayer(game, "player-2", "   ").players[1]?.name).toBe("");
   });
 
-  test("syncs the first player to the logged account name", () => {
+  test("syncs the first player to the online profile name", () => {
     const game: BowlingGame = {
       id: "game-1",
       activePlayerIndex: 0,

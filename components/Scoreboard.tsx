@@ -5,7 +5,6 @@ import type { SetStateAction } from "react";
 import { BarChart3, Gamepad2, History, Keyboard, ShieldCheck, Swords } from "lucide-react";
 
 import { AchievementsPanel } from "@/components/AchievementsPanel";
-import { AuthPanel } from "@/components/AuthPanel";
 import { BowlingScoreboardTable } from "@/components/BowlingScoreboardTable";
 import { GameOverPanel } from "@/components/GameOverPanel";
 import { GameSummary } from "@/components/GameSummary";
@@ -23,21 +22,14 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { TournamentPanel } from "@/components/TournamentPanel";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useTheme } from "@/hooks/useTheme";
-import {
-  attachGameOwner,
-  claimGuestHistory,
-  getAccountHistory,
-  getSessionAccount,
-  loginLocalAccount,
-  registerLocalAccount,
-} from "@/lib/auth";
+import { attachGameOwner, getProfileHistory, isGameVisibleForProfile } from "@/lib/history-ownership";
 import { evaluateAchievements } from "@/lib/bowling-achievements";
 import { listKnownPlayers } from "@/lib/bowling-charts";
 import { calculateAutoHandicap } from "@/lib/bowling-modes";
 import {
   attachTournamentOwner,
   clearFixtureResult,
-  getAccountTournaments,
+  getProfileTournaments,
   recordFixtureResult,
 } from "@/lib/bowling-tournament";
 import {
@@ -49,7 +41,6 @@ import {
 import {
   clampPlayerCount,
   createGame,
-  createId,
   createSavedGame,
   findNextActivePlayer,
   findPlayerToUndo,
@@ -63,25 +54,20 @@ import {
 } from "@/lib/bowling-game";
 import { useLocalStorage } from "@/hooks/useLocalStorage";
 import type {
-  AuthSession,
   BowlingGame,
   HandicapConfig,
   SavedGame,
   Tournament,
-  UserAccount,
 } from "@/types/bowling";
 import type { OnlineProfile } from "@/types/online";
 
 const HISTORY_KEY = "bowling-score-calculator-history";
 const ACTIVE_GAME_KEY = "bowling-score-calculator-active-game";
-const AUTH_ACCOUNTS_KEY = "bowling-score-calculator-accounts";
-const AUTH_SESSION_KEY = "bowling-score-calculator-session";
 const TOURNAMENTS_KEY = "bowling-score-calculator-tournaments";
 const EMPTY_HISTORY: SavedGame[] = [];
-const EMPTY_ACCOUNTS: UserAccount[] = [];
 const EMPTY_TOURNAMENTS: Tournament[] = [];
 
-type ActivePanel = "game" | "history" | "stats" | "tournaments" | "account";
+type ActivePanel = "game" | "history" | "stats" | "tournaments" | "club";
 
 interface PanelEntry {
   id: ActivePanel;
@@ -95,7 +81,7 @@ const panels: PanelEntry[] = [
   { id: "history", label: "Historial", icon: History },
   { id: "stats", label: "Stats", icon: BarChart3 },
   { id: "tournaments", label: "Torneo", icon: Swords },
-  { id: "account", label: "Club", icon: ShieldCheck },
+  { id: "club", label: "Club", icon: ShieldCheck },
 ];
 
 const desktopPanels = panels.filter((panel) => !panel.mobileOnly);
@@ -104,8 +90,6 @@ export function Scoreboard() {
   const initialGame = useMemo(() => createGame(1), []);
   const [history, setHistory, historyReady] = useLocalStorage<SavedGame[]>(HISTORY_KEY, EMPTY_HISTORY);
   const [storedGame, setStoredGame] = useLocalStorage<BowlingGame>(ACTIVE_GAME_KEY, initialGame);
-  const [accounts, setAccounts] = useLocalStorage<UserAccount[]>(AUTH_ACCOUNTS_KEY, EMPTY_ACCOUNTS);
-  const [session, setSession] = useLocalStorage<AuthSession | null>(AUTH_SESSION_KEY, null);
   const [tournaments, setTournaments] = useLocalStorage<Tournament[]>(TOURNAMENTS_KEY, EMPTY_TOURNAMENTS);
   const { preference: themePreference, resolvedTheme, setPreference: setThemePreference } = useTheme();
   const [activePanel, setActivePanel] = useState<ActivePanel>("game");
@@ -116,21 +100,19 @@ export function Scoreboard() {
   const [onlineProfile, setOnlineProfile] = useState<OnlineProfile | null>(null);
 
   const game = useMemo(() => restoreStoredGame(storedGame), [storedGame]);
-  const currentUser = useMemo(() => getSessionAccount(accounts, session), [accounts, session]);
-  const userId = currentUser?.id ?? null;
-  const lockedPrimaryName = onlineProfile?.username ?? currentUser?.name ?? null;
-  const accountHistory = useMemo(() => getAccountHistory(history, userId), [history, userId]);
-  const guestHistoryCount = useMemo(() => getAccountHistory(history, null).length, [history]);
+  const profileId = onlineProfile?.id ?? null;
+  const lockedPrimaryName = onlineProfile?.username ?? null;
+  const profileHistory = useMemo(() => getProfileHistory(history, profileId), [history, profileId]);
   const playerCount = game.players.length;
   const activePlayer = game.players[game.activePlayerIndex] ?? game.players[0];
   const activeScore = calculateGameScore(activePlayer.rolls);
-  const stats = useMemo(() => calculateStats(accountHistory), [accountHistory]);
-  const achievements = useMemo(() => evaluateAchievements(accountHistory), [accountHistory]);
-  const accountTournaments = useMemo(
-    () => getAccountTournaments(tournaments, userId),
-    [tournaments, userId],
+  const stats = useMemo(() => calculateStats(profileHistory), [profileHistory]);
+  const achievements = useMemo(() => evaluateAchievements(profileHistory), [profileHistory]);
+  const profileTournaments = useMemo(
+    () => getProfileTournaments(tournaments, profileId),
+    [tournaments, profileId],
   );
-  const knownPlayers = useMemo(() => listKnownPlayers(accountHistory), [accountHistory]);
+  const knownPlayers = useMemo(() => listKnownPlayers(profileHistory), [profileHistory]);
   const canUndo = game.players.some((player) => player.rolls.length > 0);
   const finished = isGameFinished(game);
 
@@ -228,11 +210,11 @@ export function Scoreboard() {
       }
       const playerHandicaps: Record<string, number> = {};
       for (const player of target.players) {
-        playerHandicaps[player.id] = calculateAutoHandicap(player.name, accountHistory, target.handicap);
+        playerHandicaps[player.id] = calculateAutoHandicap(player.name, profileHistory, target.handicap);
       }
       return { ...target, playerHandicaps };
     },
-    [accountHistory],
+    [profileHistory],
   );
 
   useEffect(() => {
@@ -316,72 +298,29 @@ export function Scoreboard() {
       return;
     }
 
-    const savedGame = attachGameOwner(createSavedGame(game), userId);
+    const savedGame = attachGameOwner(createSavedGame(game), profileId);
     setHistory((currentHistory) => [savedGame, ...currentHistory].slice(0, 50));
     setGame((currentGame) => ({ ...currentGame, savedAt: savedGame.date }));
     setSelectedGame(savedGame);
   }
 
   function clearHistory() {
-    if (accountHistory.length === 0) {
+    if (profileHistory.length === 0) {
       return;
     }
 
-    if (!window.confirm("¿Borrar el historial de la cuenta actual?")) {
+    if (!window.confirm("¿Borrar el historial de este perfil?")) {
       return;
     }
 
     setHistory((currentHistory) =>
-      currentHistory.filter((savedGame) => (userId ? savedGame.ownerId !== userId : Boolean(savedGame.ownerId))),
+      currentHistory.filter((savedGame) => !isGameVisibleForProfile(savedGame, profileId)),
     );
     setSelectedGame(null);
   }
 
-  function register(name: string, email: string, password: string) {
-    const result = registerLocalAccount(accounts, {
-      id: createId("user"),
-      name,
-      email,
-      password,
-      now: new Date().toISOString(),
-    });
-
-    setAccounts(result.accounts);
-    setSession(result.session);
-    setSelectedGame(null);
-    setActivePanel("account");
-  }
-
-  function login(email: string, password: string) {
-    const result = loginLocalAccount(accounts, {
-      email,
-      password,
-      now: new Date().toISOString(),
-    });
-
-    setAccounts(result.accounts);
-    setSession(result.session);
-    setSelectedGame(null);
-    setActivePanel("account");
-  }
-
-  function logout() {
-    setSession(null);
-    setSelectedGame(null);
-    setActivePanel("account");
-  }
-
-  function importGuestHistory() {
-    if (!currentUser) {
-      return;
-    }
-
-    setHistory((currentHistory) => claimGuestHistory(currentHistory, currentUser.id));
-    setSelectedGame(null);
-  }
-
   function createTournamentEntry(tournament: Tournament) {
-    const owned = attachTournamentOwner(tournament, userId);
+    const owned = attachTournamentOwner(tournament, profileId);
     setTournaments((current) => [owned, ...current].slice(0, 30));
   }
 
@@ -607,7 +546,7 @@ export function Scoreboard() {
           {/* Tab content — full width */}
           <div className={tabContentClass("history")} id="tab-history" role="tabpanel">
             <HistoryPanel
-              history={accountHistory}
+              history={profileHistory}
               isReady={historyReady}
               onClear={clearHistory}
               onSelect={setSelectedGame}
@@ -617,11 +556,11 @@ export function Scoreboard() {
 
           <div className={tabContentClass("stats", "space-y-4")} id="tab-stats" role="tabpanel">
             <div className="grid gap-4 xl:grid-cols-2">
-              <StatsPanel history={accountHistory} stats={stats} />
+              <StatsPanel history={profileHistory} stats={stats} />
               <div className="space-y-4">
-                <FriendsRankingPanel history={accountHistory} />
+                <FriendsRankingPanel history={profileHistory} />
                 <AchievementsPanel achievements={achievements} />
-                <HeadToHeadPanel history={accountHistory} />
+                <HeadToHeadPanel history={profileHistory} />
               </div>
             </div>
             <RulesExplanation />
@@ -635,23 +574,13 @@ export function Scoreboard() {
               onCreate={createTournamentEntry}
               onDelete={deleteTournament}
               onRecord={recordTournamentResult}
-              tournaments={accountTournaments}
+              tournaments={profileTournaments}
             />
           </div>
 
-          <div className={tabContentClass("account")} id="tab-account" role="tabpanel">
-            <div className="grid gap-4 xl:grid-cols-2">
-              <OnlineClubPanel history={accountHistory} onProfileChange={setOnlineProfile} />
-              <AuthPanel
-                accountHistoryCount={accountHistory.length}
-                accountsCount={accounts.length}
-                currentUser={currentUser}
-                guestHistoryCount={guestHistoryCount}
-                onClaimGuestHistory={importGuestHistory}
-                onLogin={login}
-                onLogout={logout}
-                onRegister={register}
-              />
+          <div className={tabContentClass("club")} id="tab-club" role="tabpanel">
+            <div className="mx-auto max-w-5xl">
+              <OnlineClubPanel history={profileHistory} onProfileChange={setOnlineProfile} />
             </div>
           </div>
         </main>

@@ -11,10 +11,9 @@ Aplicación web moderna para calcular puntuaciones oficiales de bowling en parti
 - Borrar última tirada y reiniciar con confirmación.
 - Modo de 1 a 6 jugadores con nombres editables, turno activo y ranking final.
 - Persistencia local de la partida en curso para no perder avances al cerrar la app.
-- Registro e inicio de sesión con perfiles locales por dispositivo.
-- El nombre de usuario registrado se fija como jugador principal de la partida.
-- Historial y estadísticas separados por cuenta o modo invitado.
-- Importación de partidas de invitado a una cuenta local.
+- Registro e inicio de sesión online con Supabase.
+- El username online se fija como jugador principal de la partida.
+- Historial y estadísticas separados por perfil online o modo invitado/offline.
 - Historial local de partidas completadas.
 - Filtros de historial por jugador, puntuación mínima y partidas perfectas.
 - Ranking local de amigos calculado desde las partidas guardadas.
@@ -75,7 +74,7 @@ npm run build
 
 ## Supabase Online
 
-La V6 añade una capa online opcional. Si no configuras Supabase, la app sigue funcionando en modo local/offline y el panel Club muestra instrucciones.
+La V6 usa Supabase como sistema principal de cuenta. Si no configuras Supabase, la app sigue funcionando en modo invitado/offline y el panel Club muestra instrucciones.
 
 1. Crea un proyecto en Supabase.
 2. Copia `.env.example` a `.env.local`.
@@ -113,7 +112,7 @@ En el décimo frame, una partida abierta termina con dos tiradas. Un spare habil
 
 ## Analítica local
 
-La V3 añade analítica sin backend en [lib/bowling-analytics.ts](/Users/seryio/Desktop/Bowling/lib/bowling-analytics.ts). Desde el historial local se calculan estadísticas por jugador, filtros de historial, comparativas entre partidas guardadas y texto listo para compartir. Todo sigue funcionando offline y sin enviar datos fuera del dispositivo.
+La V3 añade analítica sin backend en [lib/bowling-analytics.ts](/Users/seryio/Desktop/Bowling/lib/bowling-analytics.ts). Desde el historial local del perfil activo se calculan estadísticas por jugador, filtros de historial, comparativas entre partidas guardadas y texto listo para compartir. Todo sigue funcionando offline y sin enviar datos fuera del dispositivo salvo cuando sincronizas con Supabase.
 
 ## PWA y offline
 
@@ -121,11 +120,11 @@ La V4 mejora la app instalable. [components/PwaRegister.tsx](/Users/seryio/Deskt
 
 En desarrollo, el service worker se desregistra automáticamente para evitar cachés obsoletas de CSS/JS.
 
-## Cuentas locales
+## Cuenta online
 
-La V5 añade perfiles locales en [lib/auth.ts](/Users/seryio/Desktop/Bowling/lib/auth.ts) y [components/AuthPanel.tsx](/Users/seryio/Desktop/Bowling/components/AuthPanel.tsx). Cada cuenta tiene su propio historial y estadísticas, mientras que el modo invitado sigue disponible. Las cuentas viven en `localStorage`; no hay sincronización externa todavía ni envío de datos a terceros.
+La app ya no usa cuentas locales separadas. La identidad principal vive en Supabase desde [components/OnlineClubPanel.tsx](/Users/seryio/Desktop/Bowling/components/OnlineClubPanel.tsx). `localStorage` se mantiene para la partida en curso, historial offline, tema y torneos locales.
 
-Cuando hay una sesión iniciada, el primer jugador del marcador usa siempre el nombre de usuario de la cuenta. En modo invitado, los nombres siguen siendo editables libremente. Los rankings de amigos se calculan localmente a partir de los nombres presentes en las partidas guardadas.
+Cuando hay una sesión online iniciada, el primer jugador del marcador usa siempre el username del perfil Supabase. En modo invitado/offline, los nombres siguen siendo editables libremente. El historial visible incluye las partidas del perfil online activo y las partidas invitadas aún no asignadas.
 
 ## Estructura
 
