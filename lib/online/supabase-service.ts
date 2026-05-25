@@ -69,8 +69,9 @@ export interface OnlineAuthInput {
 }
 
 export interface OnlineAuthResult {
-  user: User;
+  user: User | null;
   profile: OnlineProfile | null;
+  requiresEmailConfirmation?: boolean;
 }
 
 function mapProfile(record: ProfileRecord): OnlineProfile {
@@ -206,24 +207,21 @@ export async function signUpOnline(client: SupabaseClient, input: OnlineAuthInpu
   });
 
   throwSupabaseError(error);
-  if (!data.user) {
-    throw new Error("Supabase no devolvió un usuario tras el registro.");
+  if (!data.user || !data.session) {
+    return {
+      user: null,
+      profile: null,
+      requiresEmailConfirmation: true,
+    };
   }
 
-  const profile = data.session
-    ? await upsertOnlineProfile(client, {
-        userId: data.user.id,
-        username,
-        displayName: username,
-      })
-    : {
-        id: data.user.id,
-        username,
-        displayName: username,
-        createdAt: new Date().toISOString(),
-      };
+  const profile = await upsertOnlineProfile(client, {
+    userId: data.user.id,
+    username,
+    displayName: username,
+  });
 
-  return { user: data.user, profile };
+  return { user: data.user, profile, requiresEmailConfirmation: false };
 }
 
 export async function signInOnline(

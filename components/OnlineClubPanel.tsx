@@ -133,6 +133,15 @@ export function OnlineClubPanel({ history, onProfileChange }: OnlineClubPanelPro
       const result = authMode === "register"
         ? await signUpOnline(client, { username, email, password })
         : await signInOnline(client, { email, password });
+
+      if (!result.user) {
+        setUser(null);
+        setDashboard(null);
+        onProfileChange(null);
+        setAuthMode("login");
+        return "Registro recibido. Revisa tu email si Supabase pide confirmación y después inicia sesión.";
+      }
+
       setUser(result.user);
       onProfileChange(result.profile);
       await refreshDashboard(result.user.id);
