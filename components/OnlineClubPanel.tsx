@@ -5,6 +5,7 @@ import { CalendarDays, Clipboard, LogIn, RefreshCw, ShieldCheck, Trophy, UsersRo
 import type { User } from "@supabase/supabase-js";
 
 import { getSupabaseBrowserClient, isSupabaseConfigured } from "@/lib/online/supabase-client";
+import { isGame3DSavedGame } from "@/lib/game/bowling-game-session";
 import {
   acceptOnlineInvite,
   createFriendGroup,
@@ -57,6 +58,7 @@ export function OnlineClubPanel({ history, onProfileChange }: OnlineClubPanelPro
   const [error, setError] = useState<string | null>(null);
 
   const profile = dashboard?.profile ?? null;
+  const gameHistory = useMemo(() => history.filter(isGame3DSavedGame), [history]);
   const activeGroup = dashboard?.groups[0] ?? null;
   const activeSeason = useMemo(
     () => getActiveSeasons(dashboard?.seasons ?? [], new Date().toISOString())[0] ?? null,
@@ -224,12 +226,12 @@ export function OnlineClubPanel({ history, onProfileChange }: OnlineClubPanelPro
     await runAction(async () => {
       const synced = await syncSavedGamesToSupabase(client, {
         userId: user.id,
-        history,
+        history: gameHistory,
         groupId: activeGroup?.id,
         seasonId: activeSeason?.id,
       });
       await refreshDashboard(user.id);
-      return `${synced} partidas sincronizadas online.`;
+      return `${synced} partidas del juego sincronizadas online.`;
     });
   }
 
@@ -342,12 +344,12 @@ export function OnlineClubPanel({ history, onProfileChange }: OnlineClubPanelPro
           <div className="grid gap-2 sm:grid-cols-2">
             <button
               className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-emerald-300/35 bg-emerald-300 px-3 text-sm font-black text-black transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-45"
-              disabled={busy || history.length === 0}
+              disabled={busy || gameHistory.length === 0}
               onClick={handleSync}
               type="button"
             >
               <RefreshCw aria-hidden="true" size={16} />
-              Sincronizar historial
+              Sincronizar juego
             </button>
             <button
               className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-white/10 bg-black/30 px-3 text-sm font-bold text-white/70 transition hover:border-cyan-300/50 hover:text-white"
@@ -455,7 +457,7 @@ export function OnlineClubPanel({ history, onProfileChange }: OnlineClubPanelPro
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-white/45">Sin partidas online todavía. Sincroniza tu historial para empezar.</p>
+              <p className="text-sm text-white/45">Sin partidas online todavía. Termina una partida en Juego y sincronízala.</p>
             )}
           </div>
         </div>

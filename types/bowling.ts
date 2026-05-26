@@ -4,6 +4,8 @@ export type FrameKind = "strike" | "spare" | "open" | "incomplete";
 
 export type GameMode = "classic";
 
+export type SavedGameSource = "calculator" | "game3d";
+
 export interface HandicapConfig {
   enabled: boolean;
   /** Score objetivo desde el que se calcula el handicap. Por defecto 200. */
@@ -75,6 +77,7 @@ export interface SavedGame {
   winningScore: number;
   ownerId?: string;
   mode?: GameMode;
+  source?: SavedGameSource;
 }
 
 export interface BowlingStats {

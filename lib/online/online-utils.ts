@@ -36,6 +36,9 @@ export function buildOnlineLeaderboard(
   const byUser = new Map<string, OnlineGameRow[]>();
 
   for (const game of games) {
+    if (game.source !== "game3d") {
+      continue;
+    }
     const current = byUser.get(game.ownerId) ?? [];
     current.push(game);
     byUser.set(game.ownerId, current);

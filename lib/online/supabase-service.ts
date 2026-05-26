@@ -1,7 +1,8 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
+import { isGame3DSavedGame } from "@/lib/game/bowling-game-session";
 import { createInviteCode, sanitizeUsername, buildOnlineLeaderboard } from "@/lib/online/online-utils";
-import type { SavedGame } from "@/types/bowling";
+import type { SavedGame, SavedGameSource } from "@/types/bowling";
 import type {
   OnlineDashboard,
   OnlineFriendGroup,
@@ -60,6 +61,7 @@ interface GameRecord {
   score: number;
   summary: string | null;
   played_at: string;
+  payload?: unknown;
 }
 
 export interface OnlineAuthInput {
@@ -119,6 +121,10 @@ function mapSeason(record: SeasonRecord): OnlineSeason {
 }
 
 function mapGame(record: GameRecord): OnlineGameRow {
+  const payload = typeof record.payload === "object" && record.payload !== null
+    ? record.payload as { source?: SavedGameSource }
+    : null;
+
   return {
     id: record.id,
     ownerId: record.owner_id,
@@ -127,6 +133,7 @@ function mapGame(record: GameRecord): OnlineGameRow {
     score: record.score,
     summary: record.summary ?? "",
     playedAt: record.played_at,
+    source: payload?.source,
   };
 }
 
@@ -360,11 +367,13 @@ export async function syncSavedGamesToSupabase(
     seasonId?: string | null;
   },
 ): Promise<number> {
-  if (input.history.length === 0) {
+  const gameHistory = input.history.filter(isGame3DSavedGame);
+
+  if (gameHistory.length === 0) {
     return 0;
   }
 
-  const rows = input.history.map((game) => ({
+  const rows = gameHistory.map((game) => ({
     owner_id: input.userId,
     local_id: game.id,
     group_id: input.groupId ?? null,
@@ -430,12 +439,12 @@ export async function loadOnlineDashboard(client: SupabaseClient, userId: string
   const gamesResult = groupIds.length > 0
     ? await client
         .from("games")
-        .select("id, owner_id, group_id, season_id, score, summary, played_at")
+        .select("id, owner_id, group_id, season_id, score, summary, played_at, payload")
         .in("group_id", groupIds)
         .order("played_at", { ascending: false })
     : await client
         .from("games")
-        .select("id, owner_id, group_id, season_id, score, summary, played_at")
+        .select("id, owner_id, group_id, season_id, score, summary, played_at, payload")
         .eq("owner_id", userId)
         .order("played_at", { ascending: false });
   throwSupabaseError(gamesResult.error);

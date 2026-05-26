@@ -30,6 +30,7 @@ const games: OnlineGameRow[] = [
     score: 180,
     summary: "X 8 /",
     playedAt: "2026-05-22T20:00:00.000Z",
+    source: "game3d",
   },
   {
     id: "g2",
@@ -37,6 +38,7 @@ const games: OnlineGameRow[] = [
     score: 220,
     summary: "X X 9 /",
     playedAt: "2026-05-24T20:00:00.000Z",
+    source: "game3d",
   },
   {
     id: "g3",
@@ -44,6 +46,15 @@ const games: OnlineGameRow[] = [
     score: 210,
     summary: "9 / X",
     playedAt: "2026-05-23T20:00:00.000Z",
+    source: "game3d",
+  },
+  {
+    id: "manual",
+    ownerId: "u2",
+    score: 300,
+    summary: "X X X",
+    playedAt: "2026-05-25T20:00:00.000Z",
+    source: "calculator",
   },
 ];
 

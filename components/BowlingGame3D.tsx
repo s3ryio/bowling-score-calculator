@@ -5,6 +5,14 @@ import { RotateCcw, Target, Zap } from "lucide-react";
 import RAPIER from "@dimforge/rapier3d-compat";
 import * as THREE from "three";
 
+import { FrameBox } from "@/components/FrameBox";
+import {
+  createGame3DSavedGame,
+  createGame3DSession,
+  getGame3DNextShot,
+  recordGame3DShot,
+  type Game3DSession,
+} from "@/lib/game/bowling-game-session";
 import {
   BOWLING_LANE_METERS,
   deriveShotFromGesture,
@@ -12,6 +20,7 @@ import {
   type ShotInput,
   type SimulationPoint,
 } from "@/lib/game/bowling-simulation";
+import type { SavedGame } from "@/types/bowling";
 
 interface PinRuntime {
   body: RAPIER.RigidBody;
@@ -31,10 +40,18 @@ interface BowlingRuntime {
   resizeObserver: ResizeObserver;
   dispose: () => void;
   launch: (shot: ShotInput) => void;
+  resetBall: () => void;
+  resetRack: () => void;
   reset: () => void;
 }
 
 type GameStatus = "loading" | "ready" | "aiming" | "rolling" | "settled";
+
+interface BowlingGame3DProps {
+  bestScore?: number;
+  onGameComplete?: (game: SavedGame) => void;
+  playerName?: string | null;
+}
 
 interface DragState {
   points: SimulationPoint[];
@@ -174,6 +191,7 @@ async function createBowlingRuntime(
   canvas: HTMLCanvasElement,
   onStatus: (status: GameStatus) => void,
   onKnockedPins: (count: number) => void,
+  onShotSettled: (count: number) => void,
 ): Promise<BowlingRuntime> {
   await RAPIER.init();
 
@@ -392,7 +410,9 @@ async function createBowlingRuntime(
       if (settledFrames > 24) {
         currentShot = null;
         settledFrames = 0;
+        const finalKnocked = countKnockedPins();
         onStatus("settled");
+        onShotSettled(finalKnocked);
       }
     } else {
       settledFrames = 0;
@@ -410,7 +430,17 @@ async function createBowlingRuntime(
     body.wakeUp();
   }
 
-  function reset() {
+  function resetBall() {
+    currentShot = null;
+    lastKnockedCount = -1;
+    settledFrames = 0;
+    resetBody(ballBody, BALL_START);
+    updateMeshes();
+    onKnockedPins(countKnockedPins());
+    onStatus("ready");
+  }
+
+  function resetRack() {
     currentShot = null;
     lastKnockedCount = -1;
     settledFrames = 0;
@@ -421,6 +451,10 @@ async function createBowlingRuntime(
     updateMeshes();
     onKnockedPins(0);
     onStatus("ready");
+  }
+
+  function reset() {
+    resetRack();
   }
 
   function launch(shot: ShotInput) {
@@ -465,6 +499,8 @@ async function createBowlingRuntime(
     },
     resizeObserver,
     launch,
+    resetBall,
+    resetRack,
     reset,
     dispose: () => {
       window.cancelAnimationFrame(animationFrame);
@@ -476,15 +512,77 @@ async function createBowlingRuntime(
   };
 }
 
-export function BowlingGame3D() {
+export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: BowlingGame3DProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const runtimeRef = useRef<BowlingRuntime | null>(null);
   const dragRef = useRef<DragState | null>(null);
+  const onShotSettledRef = useRef<(count: number) => void>(() => undefined);
+  const completedSavedRef = useRef(false);
+  const nextAutoResetRef = useRef<number | null>(null);
+  const initialPlayerName = playerName?.trim() || "Invitado";
+  const [session, setSession] = useState<Game3DSession>(() => createGame3DSession(initialPlayerName));
   const [status, setStatus] = useState<GameStatus>("loading");
   const [knockedPins, setKnockedPins] = useState(0);
+  const [lastRoll, setLastRoll] = useState<number | null>(null);
+  const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<ShotInput | null>(null);
   const [dragPoints, setDragPoints] = useState<SimulationPoint[]>([]);
+  const sessionRef = useRef(session);
+
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
+  useEffect(() => {
+    const cleanName = playerName?.trim();
+    if (!cleanName || sessionRef.current.rolls.length > 0) {
+      return;
+    }
+
+    setSession((current) => ({
+      ...current,
+      playerName: cleanName,
+    }));
+  }, [playerName]);
+
+  const handleShotSettled = useCallback(
+    (count: number) => {
+      const result = recordGame3DShot(sessionRef.current, count);
+      sessionRef.current = result.session;
+      setSession(result.session);
+      setLastRoll(result.rollPins);
+      setKnockedPins(result.knockedPinsTotal);
+      setPreview(null);
+
+      if (result.session.isComplete) {
+        if (!completedSavedRef.current) {
+          completedSavedRef.current = true;
+          const savedGame = createGame3DSavedGame(result.session);
+          onGameComplete?.(savedGame);
+          setSavedMessage(`Partida guardada: ${savedGame.winningScore} puntos.`);
+        }
+        return;
+      }
+
+      if (nextAutoResetRef.current) {
+        window.clearTimeout(nextAutoResetRef.current);
+      }
+
+      nextAutoResetRef.current = window.setTimeout(() => {
+        if (result.resetRack) {
+          runtimeRef.current?.resetRack();
+        } else {
+          runtimeRef.current?.resetBall();
+        }
+      }, 900);
+    },
+    [onGameComplete],
+  );
+
+  useEffect(() => {
+    onShotSettledRef.current = handleShotSettled;
+  }, [handleShotSettled]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -496,7 +594,13 @@ export function BowlingGame3D() {
     }
 
     setStatus("loading");
-    void createBowlingRuntime(container, canvas, setStatus, setKnockedPins).then((runtime) => {
+    void createBowlingRuntime(
+      container,
+      canvas,
+      setStatus,
+      setKnockedPins,
+      (count) => onShotSettledRef.current(count),
+    ).then((runtime) => {
       if (cancelled) {
         runtime.dispose();
         return;
@@ -507,10 +611,18 @@ export function BowlingGame3D() {
 
     return () => {
       cancelled = true;
+      if (nextAutoResetRef.current) {
+        window.clearTimeout(nextAutoResetRef.current);
+      }
       runtimeRef.current?.dispose();
       runtimeRef.current = null;
     };
   }, []);
+
+  const nextShot = useMemo(() => getGame3DNextShot(session), [session]);
+  const totalScore = session.score.total;
+  const frameLabel = nextShot.isComplete ? "Final" : `${nextShot.frameNumber}.${nextShot.rollNumber}`;
+  const frameGridClass = "grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-10";
 
   const statusLabel = useMemo(() => {
     switch (status) {
@@ -521,11 +633,11 @@ export function BowlingGame3D() {
       case "rolling":
         return "Rodando";
       case "settled":
-        return "Tiro terminado";
+        return session.isComplete ? "Partida completa" : "Preparando siguiente tiro";
       default:
-        return "Listo";
+        return session.isComplete ? "Partida completa" : "Listo";
     }
-  }, [status]);
+  }, [session.isComplete, status]);
 
   const updatePreview = useCallback((points: SimulationPoint[]) => {
     const container = containerRef.current;
@@ -553,7 +665,7 @@ export function BowlingGame3D() {
   }
 
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (!runtimeRef.current || status === "loading" || status === "rolling") {
+    if (!runtimeRef.current || session.isComplete || status === "loading" || status === "rolling") {
       return;
     }
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -616,7 +728,19 @@ export function BowlingGame3D() {
     runtime.launch(shot);
   }
 
-  function resetShot() {
+  function resetGame() {
+    if (nextAutoResetRef.current) {
+      window.clearTimeout(nextAutoResetRef.current);
+      nextAutoResetRef.current = null;
+    }
+
+    const nextSession = createGame3DSession(playerName?.trim() || "Invitado");
+    sessionRef.current = nextSession;
+    completedSavedRef.current = false;
+    setSession(nextSession);
+    setLastRoll(null);
+    setSavedMessage(null);
+    setKnockedPins(0);
     runtimeRef.current?.reset();
     dragRef.current = null;
     setDragPoints([]);
@@ -626,7 +750,7 @@ export function BowlingGame3D() {
   const pathData = dragPoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
 
   return (
-    <section className="overflow-hidden rounded-lg border border-white/10 bg-[#03050a]">
+    <section className="game-3d-panel overflow-hidden rounded-lg border border-white/10 bg-[#03050a]">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-white/[0.045] px-4 py-3">
         <div>
           <div className="flex items-center gap-2 text-white">
@@ -638,16 +762,20 @@ export function BowlingGame3D() {
 
         <div className="flex items-center gap-2">
           <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2">
-            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/35">Pinos</p>
-            <p className="text-xl font-black text-white">{knockedPins}/10</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/35">Score</p>
+            <p className="text-xl font-black text-amber-200">{totalScore}</p>
+          </div>
+          <div className="hidden rounded-lg border border-white/10 bg-black/30 px-3 py-2 sm:block">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/35">Frame</p>
+            <p className="text-xl font-black text-white">{frameLabel}</p>
           </div>
           <button
             className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/10 bg-black/35 px-3 text-sm font-bold text-white/75 transition hover:border-cyan-300/50 hover:text-white"
-            onClick={resetShot}
+            onClick={resetGame}
             type="button"
           >
             <RotateCcw aria-hidden="true" size={16} />
-            Reiniciar
+            Nueva
           </button>
         </div>
       </div>
@@ -686,7 +814,7 @@ export function BowlingGame3D() {
           </svg>
         )}
 
-        <div className="pointer-events-none absolute left-4 right-4 top-4 grid gap-2 sm:grid-cols-3">
+        <div className="pointer-events-none absolute left-4 right-4 top-4 hidden gap-2 sm:grid sm:grid-cols-3 lg:right-auto lg:w-[520px]">
           <div className="rounded-lg border border-white/15 bg-black/60 p-3 backdrop-blur-md">
             <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/55">Potencia</p>
             <div className="mt-2 h-2 rounded-full bg-white/10">
@@ -704,6 +832,74 @@ export function BowlingGame3D() {
               {preview ? `${Math.round(preview.spin * 100)}%` : "0%"}
             </p>
           </div>
+        </div>
+
+        <div className="pointer-events-none absolute bottom-3 left-3 right-3 grid grid-cols-2 gap-2 sm:bottom-4 sm:left-4 sm:right-4 sm:grid-cols-4 lg:left-auto lg:w-[600px]">
+          <div className="rounded-lg border border-white/15 bg-black/65 p-2.5 backdrop-blur-md sm:p-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/45">Turno</p>
+            <p className="mt-1 text-base font-black text-white sm:text-lg">{session.playerName}</p>
+          </div>
+          <div className="rounded-lg border border-white/15 bg-black/65 p-2.5 backdrop-blur-md sm:p-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/45">Pinos</p>
+            <p className="mt-1 text-base font-black text-white sm:text-lg">
+              {knockedPins}/10 <span className="text-sm text-white/35">en pie {Math.max(0, 10 - knockedPins)}</span>
+            </p>
+          </div>
+          <div className="rounded-lg border border-white/15 bg-black/65 p-2.5 backdrop-blur-md sm:p-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/45">Última</p>
+            <p className="mt-1 text-base font-black text-white sm:text-lg">{lastRoll ?? "—"}</p>
+          </div>
+          <div className="rounded-lg border border-white/15 bg-black/65 p-2.5 backdrop-blur-md sm:p-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/45">Mejor</p>
+            <p className="mt-1 text-base font-black text-amber-200 sm:text-lg">{bestScore}</p>
+          </div>
+        </div>
+
+        {session.isComplete && (
+          <div className="absolute inset-0 grid place-items-center bg-black/45 p-4 backdrop-blur-[2px]">
+            <div className="w-full max-w-md rounded-lg border border-cyan-300/40 bg-slate-950/90 p-5 text-center shadow-[0_30px_120px_rgba(34,211,238,0.22)]">
+              <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-200">Partida completa</p>
+              <p className="mt-2 text-6xl font-black text-white">{totalScore}</p>
+              <p className="mt-2 text-sm font-semibold text-white/55">
+                {savedMessage ?? "Resultado guardado en tu historial local del juego."}
+              </p>
+              <button
+                className="mt-5 inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-cyan-300 px-5 text-sm font-black text-black transition hover:bg-cyan-200"
+                onClick={resetGame}
+                type="button"
+              >
+                <RotateCcw aria-hidden="true" size={16} />
+                Nueva partida
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3 border-t border-white/10 bg-black/25 p-3 sm:p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-white/35">Marcador oficial</p>
+            <p className="mt-1 text-sm font-semibold text-white/55">
+              {nextShot.isComplete
+                ? "La partida ya está completa."
+                : `Frame ${nextShot.frameNumber}, tirada ${nextShot.rollNumber}. ${nextShot.standingPins} pinos disponibles.`}
+            </p>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/35 px-3 py-2 text-right">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/35">Total</p>
+            <p className="text-2xl font-black text-amber-200">{totalScore}</p>
+          </div>
+        </div>
+
+        <div className={frameGridClass}>
+          {session.score.frames.map((frame) => (
+            <FrameBox
+              frame={frame}
+              isActive={!session.isComplete && frame.frameNumber === nextShot.frameNumber}
+              key={frame.frameNumber}
+            />
+          ))}
         </div>
       </div>
     </section>

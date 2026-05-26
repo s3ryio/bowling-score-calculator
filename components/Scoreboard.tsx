@@ -23,6 +23,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { TournamentPanel } from "@/components/TournamentPanel";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useTheme } from "@/hooks/useTheme";
+import { isGame3DSavedGame } from "@/lib/game/bowling-game-session";
 import { attachGameOwner, getProfileHistory, isGameVisibleForProfile } from "@/lib/history-ownership";
 import { evaluateAchievements } from "@/lib/bowling-achievements";
 import { listKnownPlayers } from "@/lib/bowling-charts";
@@ -104,10 +105,12 @@ export function Scoreboard() {
   const profileId = onlineProfile?.id ?? null;
   const lockedPrimaryName = onlineProfile?.username ?? null;
   const profileHistory = useMemo(() => getProfileHistory(history, profileId), [history, profileId]);
+  const game3DHistory = useMemo(() => profileHistory.filter(isGame3DSavedGame), [profileHistory]);
   const playerCount = game.players.length;
   const activePlayer = game.players[game.activePlayerIndex] ?? game.players[0];
   const activeScore = calculateGameScore(activePlayer.rolls);
   const stats = useMemo(() => calculateStats(profileHistory), [profileHistory]);
+  const game3DStats = useMemo(() => calculateStats(game3DHistory), [game3DHistory]);
   const achievements = useMemo(() => evaluateAchievements(profileHistory), [profileHistory]);
   const profileTournaments = useMemo(
     () => getProfileTournaments(tournaments, profileId),
@@ -305,6 +308,18 @@ export function Scoreboard() {
     setSelectedGame(savedGame);
   }
 
+  function saveGame3DResult(savedGame: SavedGame) {
+    const ownedGame = attachGameOwner(savedGame, profileId);
+    setHistory((currentHistory) => {
+      if (currentHistory.some((gameEntry) => gameEntry.id === ownedGame.id)) {
+        return currentHistory;
+      }
+
+      return [ownedGame, ...currentHistory].slice(0, 50);
+    });
+    setSelectedGame(ownedGame);
+  }
+
   function clearHistory() {
     if (profileHistory.length === 0) {
       return;
@@ -493,7 +508,11 @@ export function Scoreboard() {
 
           {/* Tab content — full width */}
           <div className={tabContentClass("game")} id="tab-game" role="tabpanel">
-            <BowlingGame3D />
+            <BowlingGame3D
+              bestScore={game3DStats.bestScore}
+              onGameComplete={saveGame3DResult}
+              playerName={lockedPrimaryName ?? game.players[0]?.name ?? "Invitado"}
+            />
           </div>
 
           <div className={tabContentClass("calculator", "space-y-4")} id="tab-calculator" role="tabpanel">

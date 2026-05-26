@@ -290,5 +290,6 @@ export function createSavedGame(game: BowlingGame): SavedGame {
     players,
     winningScore,
     mode: game.mode,
+    source: "calculator",
   };
 }

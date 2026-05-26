@@ -1,3 +1,5 @@
+import type { SavedGameSource } from "@/types/bowling";
+
 export interface OnlineProfile {
   id: string;
   username: string;
@@ -49,6 +51,7 @@ export interface OnlineGameRow {
   score: number;
   summary: string;
   playedAt: string;
+  source?: SavedGameSource;
 }
 
 export interface OnlineLeaderboardEntry {

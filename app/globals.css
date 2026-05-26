@@ -258,6 +258,32 @@ input {
 /* Botón de strike (amber-300 sólido) en light: oscurecer levemente para contraste con texto negro */
 [data-theme="light"] .bg-amber-300 { background-color: #f59e0b; }
 [data-theme="light"] .bg-cyan-300 { background-color: #06b6d4; }
+
+/* El juego 3D mantiene cabina oscura incluso cuando el resto de la app está en tema claro. */
+[data-theme="light"] .game-3d-panel {
+  background-color: #03050a;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #f8fafc;
+}
+
+[data-theme="light"] .game-3d-panel .text-white { color: #f8fafc; }
+[data-theme="light"] .game-3d-panel .text-white\/20 { color: rgba(248, 250, 252, 0.2); }
+[data-theme="light"] .game-3d-panel .text-white\/35 { color: rgba(248, 250, 252, 0.35); }
+[data-theme="light"] .game-3d-panel .text-white\/45 { color: rgba(248, 250, 252, 0.45); }
+[data-theme="light"] .game-3d-panel .text-white\/55 { color: rgba(248, 250, 252, 0.55); }
+[data-theme="light"] .game-3d-panel .text-white\/75 { color: rgba(248, 250, 252, 0.75); }
+[data-theme="light"] .game-3d-panel .bg-white\/\[0\.045\] { background-color: rgba(255, 255, 255, 0.045); }
+[data-theme="light"] .game-3d-panel .bg-white\/10 { background-color: rgba(255, 255, 255, 0.1); }
+[data-theme="light"] .game-3d-panel .bg-black\/25 { background-color: rgba(0, 0, 0, 0.25); }
+[data-theme="light"] .game-3d-panel .bg-black\/30 { background-color: rgba(0, 0, 0, 0.3); }
+[data-theme="light"] .game-3d-panel .bg-black\/35 { background-color: rgba(0, 0, 0, 0.35); }
+[data-theme="light"] .game-3d-panel .bg-black\/60 { background-color: rgba(0, 0, 0, 0.6); }
+[data-theme="light"] .game-3d-panel .bg-black\/65 { background-color: rgba(0, 0, 0, 0.65); }
+[data-theme="light"] .game-3d-panel .bg-slate-950\/90 { background-color: rgba(2, 6, 23, 0.9); }
+[data-theme="light"] .game-3d-panel .border-white\/10 { border-color: rgba(255, 255, 255, 0.1); }
+[data-theme="light"] .game-3d-panel .border-white\/15 { border-color: rgba(255, 255, 255, 0.15); }
+[data-theme="light"] .game-3d-panel .text-amber-200 { color: #fde68a; }
+[data-theme="light"] .game-3d-panel .text-cyan-200 { color: #a5f3fc; }
 [data-theme="light"] .bg-emerald-300 { background-color: #10b981; }
 
 /* Sombras suaves: en light reducimos el black-shadow visualmente fuerte */

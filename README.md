@@ -22,9 +22,9 @@ Aplicación web moderna para calcular puntuaciones oficiales de bowling en parti
 - Estadísticas: mejor puntuación, media, partidas, strikes, spares y porcentajes.
 - Estadísticas avanzadas por jugador y forma reciente.
 - Torneos locales todos contra todos con clasificación.
-- Juego 3D inicial con pista procedural, bola, pinos físicos y tiro por drag/swipe.
+- Juego 3D con pista procedural, bola, pinos físicos, tiro por drag/swipe y partida oficial de 10 frames.
 - Club online con Supabase: perfiles, ranking de amigos, temporadas e invitaciones.
-- Sincronización manual del historial local hacia el ranking online.
+- Sincronización manual de partidas del juego 3D hacia el ranking online.
 - Sección educativa “Cómo se puntúa”.
 - PWA con `manifest.json`, iconos, theme color, Apple web app metadata, instalación guiada, modo offline y service worker versionado.
 
@@ -98,11 +98,13 @@ La capa online vive en:
 
 ## Juego 3D
 
-La V7 introduce la base del producto principal: un juego de bowling 3D realista desde la foul line. La escena vive en [components/BowlingGame3D.tsx](/Users/seryio/Desktop/Bowling/components/BowlingGame3D.tsx), usa Three.js para renderizar la pista y Rapier para físicas rígidas de bola y pinos.
+La V8 monta el producto principal: un juego de bowling 3D realista desde la foul line. La escena vive en [components/BowlingGame3D.tsx](/Users/seryio/Desktop/Bowling/components/BowlingGame3D.tsx), usa Three.js para renderizar la pista y Rapier para físicas rígidas de bola y pinos.
 
-La primera versión se centra en una pista procedural bien controlada: madera, gutters, foul line, bola brillante, pinos con colisiones y un tiro jugable por drag/swipe. La lógica pura de geometría del rack y lectura del gesto vive en [lib/game/bowling-simulation.ts](/Users/seryio/Desktop/Bowling/lib/game/bowling-simulation.ts), con tests en [tests/bowling-simulation.test.ts](/Users/seryio/Desktop/Bowling/tests/bowling-simulation.test.ts).
+La versión actual mantiene una sesión oficial de 10 frames, calcula el marcador acumulado en tiempo real, reinicia bola o rack según corresponda y guarda automáticamente la partida completada en el historial local como resultado `game3d`. La lógica pura de la sesión vive en [lib/game/bowling-game-session.ts](/Users/seryio/Desktop/Bowling/lib/game/bowling-game-session.ts), con tests en [tests/bowling-game-session.test.ts](/Users/seryio/Desktop/Bowling/tests/bowling-game-session.test.ts).
 
-La calculadora manual queda como herramienta extra para partidas reales presenciales. El ranking online debe alimentarse de partidas generadas por el juego, no de resultados introducidos manualmente.
+La lógica pura de geometría del rack y lectura del gesto vive en [lib/game/bowling-simulation.ts](/Users/seryio/Desktop/Bowling/lib/game/bowling-simulation.ts), con tests en [tests/bowling-simulation.test.ts](/Users/seryio/Desktop/Bowling/tests/bowling-simulation.test.ts). La calculadora manual queda como herramienta extra para partidas reales presenciales.
+
+El ranking online se alimenta únicamente de partidas generadas por el juego 3D. Las partidas introducidas manualmente en la calculadora no suben al ranking del Club.
 
 Modelo online:
 
