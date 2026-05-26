@@ -61,7 +61,7 @@ interface DragState {
 const BALL_START = {
   x: 0,
   y: BOWLING_LANE_METERS.ballRadius,
-  z: 2.35,
+  z: 0.35,
 };
 
 const PIN_CENTER_Y = BOWLING_LANE_METERS.pinHeight / 2;
@@ -530,6 +530,13 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
   const [dragPoints, setDragPoints] = useState<SimulationPoint[]>([]);
   const sessionRef = useRef(session);
 
+  const clearAutoReset = useCallback(() => {
+    if (nextAutoResetRef.current) {
+      window.clearTimeout(nextAutoResetRef.current);
+      nextAutoResetRef.current = null;
+    }
+  }, []);
+
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
@@ -565,9 +572,7 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
         return;
       }
 
-      if (nextAutoResetRef.current) {
-        window.clearTimeout(nextAutoResetRef.current);
-      }
+      clearAutoReset();
 
       nextAutoResetRef.current = window.setTimeout(() => {
         if (result.resetRack) {
@@ -577,7 +582,7 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
         }
       }, 900);
     },
-    [onGameComplete],
+    [clearAutoReset, onGameComplete],
   );
 
   useEffect(() => {
@@ -611,13 +616,11 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
 
     return () => {
       cancelled = true;
-      if (nextAutoResetRef.current) {
-        window.clearTimeout(nextAutoResetRef.current);
-      }
+      clearAutoReset();
       runtimeRef.current?.dispose();
       runtimeRef.current = null;
     };
-  }, []);
+  }, [clearAutoReset]);
 
   const nextShot = useMemo(() => getGame3DNextShot(session), [session]);
   const totalScore = session.score.total;
@@ -665,7 +668,7 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
   }
 
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    if (!runtimeRef.current || session.isComplete || status === "loading" || status === "rolling") {
+    if (!runtimeRef.current || session.isComplete || status !== "ready") {
       return;
     }
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -725,14 +728,12 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
     }
 
     setPreview(shot);
+    clearAutoReset();
     runtime.launch(shot);
   }
 
   function resetGame() {
-    if (nextAutoResetRef.current) {
-      window.clearTimeout(nextAutoResetRef.current);
-      nextAutoResetRef.current = null;
-    }
+    clearAutoReset();
 
     const nextSession = createGame3DSession(playerName?.trim() || "Invitado");
     sessionRef.current = nextSession;
@@ -834,7 +835,7 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
           </div>
         </div>
 
-        <div className="pointer-events-none absolute bottom-3 left-3 right-3 grid grid-cols-2 gap-2 sm:bottom-4 sm:left-4 sm:right-4 sm:grid-cols-4 lg:left-auto lg:w-[600px]">
+        <div className="pointer-events-none absolute bottom-4 left-4 right-4 hidden gap-2 sm:grid sm:grid-cols-4 lg:left-auto lg:w-[600px]">
           <div className="rounded-lg border border-white/15 bg-black/65 p-2.5 backdrop-blur-md sm:p-3">
             <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/45">Turno</p>
             <p className="mt-1 text-base font-black text-white sm:text-lg">{session.playerName}</p>
