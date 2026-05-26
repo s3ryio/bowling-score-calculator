@@ -4,6 +4,7 @@ import {
   BOWLING_LANE_METERS,
   deriveShotFromGesture,
   getPinRackPositions,
+  resolveShotOutcome,
 } from "@/lib/game/bowling-simulation";
 
 describe("bowling 3D simulation helpers", () => {
@@ -59,5 +60,56 @@ describe("bowling 3D simulation helpers", () => {
         viewport: { width: 360, height: 720 },
       }),
     ).toBeNull();
+  });
+
+  test("turns a strong centered shot into a strike from a full rack", () => {
+    const outcome = resolveShotOutcome({
+      shot: { direction: 0, power: 1, spin: 0, releaseSpeed: 11.6 },
+      previousKnockedPins: 0,
+      standingPinIds: getPinRackPositions().map((pin) => pin.id),
+    });
+
+    expect(outcome.rollPins).toBe(10);
+    expect(outcome.knockedPinsTotal).toBe(10);
+    expect(outcome.knockedPinIds).toHaveLength(10);
+    expect(outcome.isStrike).toBe(true);
+  });
+
+  test("keeps weak off-target throws below a strike", () => {
+    const outcome = resolveShotOutcome({
+      shot: { direction: 0.9, power: 0.22, spin: -0.4, releaseSpeed: 6.2 },
+      previousKnockedPins: 0,
+      standingPinIds: getPinRackPositions().map((pin) => pin.id),
+    });
+
+    expect(outcome.rollPins).toBeGreaterThanOrEqual(0);
+    expect(outcome.rollPins).toBeLessThan(10);
+    expect(outcome.knockedPinsTotal).toBe(outcome.rollPins);
+  });
+
+  test("adds second-roll pins to the previous total without exceeding ten", () => {
+    const standingPinIds = getPinRackPositions().slice(4).map((pin) => pin.id);
+    const outcome = resolveShotOutcome({
+      shot: { direction: 0.1, power: 0.85, spin: 0.2, releaseSpeed: 10.2 },
+      previousKnockedPins: 4,
+      standingPinIds,
+    });
+
+    expect(outcome.rollPins).toBeLessThanOrEqual(6);
+    expect(outcome.knockedPinsTotal).toBe(4 + outcome.rollPins);
+    expect(outcome.knockedPinsTotal).toBeLessThanOrEqual(10);
+    expect(outcome.knockedPinIds.every((id) => standingPinIds.includes(id))).toBe(true);
+  });
+
+  test("does not invent pins when the rack is already empty", () => {
+    const outcome = resolveShotOutcome({
+      shot: { direction: 0, power: 1, spin: 0, releaseSpeed: 11.6 },
+      previousKnockedPins: 10,
+      standingPinIds: [],
+    });
+
+    expect(outcome.rollPins).toBe(0);
+    expect(outcome.knockedPinsTotal).toBe(10);
+    expect(outcome.knockedPinIds).toEqual([]);
   });
 });

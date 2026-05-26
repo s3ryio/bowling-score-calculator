@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RotateCcw, Target, Zap } from "lucide-react";
-import RAPIER from "@dimforge/rapier3d-compat";
 import * as THREE from "three";
 
 import { FrameBox } from "@/components/FrameBox";
@@ -17,33 +16,13 @@ import {
   BOWLING_LANE_METERS,
   deriveShotFromGesture,
   getPinRackPositions,
+  resolveShotOutcome,
+  type PinRackPosition,
   type ShotInput,
+  type ShotOutcome,
   type SimulationPoint,
 } from "@/lib/game/bowling-simulation";
 import type { SavedGame } from "@/types/bowling";
-
-interface PinRuntime {
-  body: RAPIER.RigidBody;
-  mesh: THREE.Group;
-  start: { x: number; y: number; z: number };
-}
-
-interface BowlingRuntime {
-  camera: THREE.PerspectiveCamera;
-  renderer: THREE.WebGLRenderer;
-  scene: THREE.Scene;
-  world: RAPIER.World;
-  ballBody: RAPIER.RigidBody;
-  ballMesh: THREE.Mesh;
-  pins: PinRuntime[];
-  animationFrame: number;
-  resizeObserver: ResizeObserver;
-  dispose: () => void;
-  launch: (shot: ShotInput) => void;
-  resetBall: () => void;
-  resetRack: () => void;
-  reset: () => void;
-}
 
 type GameStatus = "loading" | "ready" | "aiming" | "rolling" | "settled";
 
@@ -58,17 +37,42 @@ interface DragState {
   pointerId: number;
 }
 
-const BALL_START = {
-  x: 0,
-  y: BOWLING_LANE_METERS.ballRadius,
-  z: 0.35,
-};
+interface PinVisual {
+  id: string;
+  mesh: THREE.Group;
+  rack: PinRackPosition;
+  start: THREE.Vector3;
+  fallProgress: number;
+  fallSide: number;
+  standing: boolean;
+}
 
-const PIN_CENTER_Y = BOWLING_LANE_METERS.pinHeight / 2;
-const AUTO_RESET_DELAY_MS = 350;
+interface RuntimeRoll {
+  shot: ShotInput;
+  outcome: ShotOutcome;
+  startedAt: number;
+  settled: boolean;
+}
+
+interface BowlingRuntime {
+  dispose: () => void;
+  launch: (shot: ShotInput, outcome: ShotOutcome) => void;
+  resetBall: () => void;
+  resetRack: () => void;
+}
+
+const PIN_RACK = getPinRackPositions();
+const ALL_PIN_IDS = PIN_RACK.map((pin) => pin.id);
+const ROLL_DURATION_MS = 1850;
+const AUTO_RESET_DELAY_MS = 520;
+const BALL_START = new THREE.Vector3(0, BOWLING_LANE_METERS.ballRadius, 0.35);
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function easeInOutCubic(value: number): number {
+  return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
 }
 
 function createWoodTexture(): THREE.CanvasTexture {
@@ -79,22 +83,21 @@ function createWoodTexture(): THREE.CanvasTexture {
 
   if (context) {
     const gradient = context.createLinearGradient(0, 0, canvas.width, 0);
-    gradient.addColorStop(0, "#a86a2c");
-    gradient.addColorStop(0.22, "#d69645");
+    gradient.addColorStop(0, "#9a5a20");
+    gradient.addColorStop(0.18, "#d1903e");
     gradient.addColorStop(0.5, "#f0bd63");
-    gradient.addColorStop(0.78, "#c37c31");
-    gradient.addColorStop(1, "#8f5525");
+    gradient.addColorStop(0.82, "#be762c");
+    gradient.addColorStop(1, "#7a431d");
     context.fillStyle = gradient;
     context.fillRect(0, 0, canvas.width, canvas.height);
 
-    for (let y = 0; y < canvas.height; y += 10) {
-      const alpha = 0.08 + Math.random() * 0.08;
-      context.fillStyle = `rgba(255,255,255,${alpha})`;
+    for (let y = 0; y < canvas.height; y += 9) {
+      context.fillStyle = `rgba(255,255,255,${0.06 + Math.random() * 0.08})`;
       context.fillRect(0, y, canvas.width, 1);
     }
 
-    for (let x = 30; x < canvas.width; x += 58) {
-      context.fillStyle = "rgba(92, 45, 14, 0.18)";
+    for (let x = 26; x < canvas.width; x += 54) {
+      context.fillStyle = "rgba(68, 32, 10, 0.18)";
       context.fillRect(x, 0, 2, canvas.height);
     }
   }
@@ -120,21 +123,22 @@ function createPinMesh(): THREE.Group {
     new THREE.Vector2(0.018, height / 2),
   ];
   const group = new THREE.Group();
-  const geometry = new THREE.LatheGeometry(points, 36);
-  const material = new THREE.MeshStandardMaterial({
-    color: "#fff4df",
-    roughness: 0.34,
-    metalness: 0.02,
-  });
-  const body = new THREE.Mesh(geometry, material);
+  const body = new THREE.Mesh(
+    new THREE.LatheGeometry(points, 36),
+    new THREE.MeshStandardMaterial({
+      color: "#fff4df",
+      metalness: 0.02,
+      roughness: 0.34,
+    }),
+  );
   body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
 
   const bandMaterial = new THREE.MeshStandardMaterial({
     color: "#d3212c",
-    roughness: 0.42,
     metalness: 0.02,
+    roughness: 0.42,
   });
   for (const y of [height * 0.16, height * 0.22]) {
     const band = new THREE.Mesh(new THREE.CylinderGeometry(0.044, 0.044, 0.014, 36, 1, true), bandMaterial);
@@ -146,22 +150,22 @@ function createPinMesh(): THREE.Group {
 }
 
 function createBallMesh(): THREE.Mesh {
-  const geometry = new THREE.SphereGeometry(BOWLING_LANE_METERS.ballRadius, 48, 32);
+  const geometry = new THREE.SphereGeometry(BOWLING_LANE_METERS.ballRadius * 1.18, 56, 36);
   const material = new THREE.MeshPhysicalMaterial({
-    color: "#24d6ff",
+    clearcoat: 0.9,
+    clearcoatRoughness: 0.16,
+    color: "#20c8ee",
     emissive: "#031018",
-    emissiveIntensity: 0.18,
+    emissiveIntensity: 0.16,
     metalness: 0.18,
-    roughness: 0.22,
-    clearcoat: 0.8,
-    clearcoatRoughness: 0.18,
+    roughness: 0.2,
   });
   const ball = new THREE.Mesh(geometry, material);
   ball.castShadow = true;
   ball.receiveShadow = true;
 
-  const holeMaterial = new THREE.MeshStandardMaterial({ color: "#020617", roughness: 0.5 });
-  const holeGeometry = new THREE.SphereGeometry(BOWLING_LANE_METERS.ballRadius * 0.18, 18, 12);
+  const holeMaterial = new THREE.MeshStandardMaterial({ color: "#020617", roughness: 0.55 });
+  const holeGeometry = new THREE.SphereGeometry(BOWLING_LANE_METERS.ballRadius * 0.16, 18, 12);
   for (const position of [
     new THREE.Vector3(-0.035, 0.065, -0.074),
     new THREE.Vector3(0.018, 0.088, -0.065),
@@ -187,22 +191,37 @@ function disposeObject3D(root: THREE.Object3D): void {
   });
 }
 
-async function createBowlingRuntime(
+function resetPin(pin: PinVisual): void {
+  pin.standing = true;
+  pin.fallProgress = 0;
+  pin.mesh.position.copy(pin.start);
+  pin.mesh.rotation.set(0, 0, 0);
+  pin.mesh.visible = true;
+}
+
+function poseFallenPin(pin: PinVisual, progress: number): void {
+  const eased = easeInOutCubic(progress);
+  pin.mesh.position.set(
+    pin.start.x + pin.fallSide * 0.12 * eased,
+    pin.start.y - 0.12 * eased,
+    pin.start.z + 0.16 * eased,
+  );
+  pin.mesh.rotation.set(0.25 * eased, 0.55 * pin.fallSide * eased, (Math.PI / 2) * pin.fallSide * eased);
+}
+
+function createBowlingRuntime(
   container: HTMLDivElement,
   canvas: HTMLCanvasElement,
   onStatus: (status: GameStatus) => void,
-  onKnockedPins: (count: number) => void,
-  onShotSettled: (count: number) => void,
-): Promise<BowlingRuntime> {
-  await RAPIER.init();
-
+  onShotSettled: (outcome: ShotOutcome) => void,
+): BowlingRuntime {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#03050a");
   scene.fog = new THREE.Fog("#03050a", 10, 28);
 
-  const camera = new THREE.PerspectiveCamera(50, 1, 0.01, 60);
-  camera.position.set(0, 1.18, 4.15);
-  camera.lookAt(0, 0.24, -9.8);
+  const camera = new THREE.PerspectiveCamera(48, 1, 0.01, 60);
+  camera.position.set(0, 1.3, 4.25);
+  camera.lookAt(0, 0.19, -10.2);
 
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -217,13 +236,10 @@ async function createBowlingRuntime(
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.1;
 
-  const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
-  world.timestep = 1 / 60;
-
-  const ambient = new THREE.HemisphereLight("#bdefff", "#130b04", 0.9);
+  const ambient = new THREE.HemisphereLight("#bdefff", "#130b04", 0.95);
   scene.add(ambient);
 
-  const key = new THREE.DirectionalLight("#f8fbff", 2.2);
+  const key = new THREE.DirectionalLight("#f8fbff", 2.15);
   key.position.set(-1.5, 4.2, 2.2);
   key.castShadow = true;
   key.shadow.camera.near = 0.1;
@@ -235,118 +251,73 @@ async function createBowlingRuntime(
   key.shadow.mapSize.set(2048, 2048);
   scene.add(key);
 
-  const pinLight = new THREE.SpotLight("#9ff5ff", 2.4, 26, Math.PI / 7, 0.45, 1.2);
+  const pinLight = new THREE.SpotLight("#9ff5ff", 2.5, 26, Math.PI / 7, 0.45, 1.2);
   pinLight.position.set(0, 3.1, -8.7);
   pinLight.target.position.set(0, 0, BOWLING_LANE_METERS.pinDeckZ);
-  pinLight.castShadow = true;
   scene.add(pinLight, pinLight.target);
 
   const woodTexture = createWoodTexture();
-  const laneMaterial = new THREE.MeshPhysicalMaterial({
-    map: woodTexture,
-    color: "#f4b85c",
-    roughness: 0.24,
-    metalness: 0.02,
-    clearcoat: 0.65,
-    clearcoatRoughness: 0.2,
-  });
-  const laneLength = 22.2;
-  const laneCenterZ = -7.35;
   const lane = new THREE.Mesh(
-    new THREE.BoxGeometry(BOWLING_LANE_METERS.laneWidth, 0.08, laneLength),
-    laneMaterial,
+    new THREE.BoxGeometry(BOWLING_LANE_METERS.laneWidth, 0.08, 22.2),
+    new THREE.MeshPhysicalMaterial({
+      clearcoat: 0.65,
+      clearcoatRoughness: 0.2,
+      color: "#f4b85c",
+      map: woodTexture,
+      metalness: 0.02,
+      roughness: 0.24,
+    }),
   );
-  lane.position.set(0, -0.045, laneCenterZ);
+  lane.position.set(0, -0.045, -7.35);
   lane.receiveShadow = true;
   scene.add(lane);
 
-  const worldLaneBody = world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -0.05, laneCenterZ));
-  world.createCollider(
-    RAPIER.ColliderDesc.cuboid(BOWLING_LANE_METERS.laneWidth / 2, 0.04, laneLength / 2)
-      .setFriction(0.92)
-      .setRestitution(0.02),
-    worldLaneBody,
-  );
-
-  const gutterMaterial = new THREE.MeshStandardMaterial({ color: "#070a10", roughness: 0.46, metalness: 0.12 });
+  const gutterMaterial = new THREE.MeshStandardMaterial({ color: "#020712", roughness: 0.66, metalness: 0.14 });
   for (const side of [-1, 1]) {
-    const gutter = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.16, laneLength), gutterMaterial);
-    gutter.position.set(side * (BOWLING_LANE_METERS.laneWidth / 2 + 0.2), -0.08, laneCenterZ);
+    const gutter = new THREE.Mesh(new THREE.BoxGeometry(0.23, 0.07, 22.2), gutterMaterial);
+    gutter.position.set(side * 0.68, -0.065, -7.35);
     gutter.receiveShadow = true;
     scene.add(gutter);
   }
 
   const foulLine = new THREE.Mesh(
-    new THREE.BoxGeometry(BOWLING_LANE_METERS.laneWidth + 0.52, 0.012, 0.06),
-    new THREE.MeshStandardMaterial({ color: "#23e6ff", emissive: "#0b5365", emissiveIntensity: 0.9 }),
+    new THREE.BoxGeometry(BOWLING_LANE_METERS.laneWidth + 0.36, 0.012, 0.045),
+    new THREE.MeshStandardMaterial({ color: "#8ceeff", emissive: "#0e7490", emissiveIntensity: 0.55 }),
   );
-  foulLine.position.set(0, 0.012, 0.02);
+  foulLine.position.set(0, 0.014, 0.72);
   scene.add(foulLine);
 
-  const arrowsMaterial = new THREE.MeshStandardMaterial({ color: "#101820", roughness: 0.35 });
+  const arrows = new THREE.Group();
+  const arrowMaterial = new THREE.MeshStandardMaterial({ color: "#020617", roughness: 0.4 });
   for (const x of [-0.32, -0.16, 0, 0.16, 0.32]) {
-    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.16, 3), arrowsMaterial);
-    arrow.rotation.x = Math.PI / 2;
-    arrow.rotation.z = Math.PI;
-    arrow.position.set(x, 0.018, -3.8);
-    scene.add(arrow);
+    const marker = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.08, 3), arrowMaterial);
+    marker.position.set(x, 0.02, -6.5);
+    marker.rotation.y = Math.PI;
+    arrows.add(marker);
   }
+  scene.add(arrows);
 
-  const backStop = new THREE.Mesh(
-    new THREE.BoxGeometry(2.4, 1.1, 0.18),
-    new THREE.MeshStandardMaterial({ color: "#111827", roughness: 0.45, metalness: 0.1 }),
-  );
-  backStop.position.set(0, 0.55, -19.05);
-  backStop.receiveShadow = true;
-  scene.add(backStop);
+  const ball = createBallMesh();
+  scene.add(ball);
 
-  const sideWallMaterial = new THREE.MeshStandardMaterial({ color: "#15151c", roughness: 0.55 });
-  for (const side of [-1, 1]) {
-    const wall = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.42, laneLength), sideWallMaterial);
-    wall.position.set(side * 0.93, 0.18, laneCenterZ);
-    wall.receiveShadow = true;
-    scene.add(wall);
-  }
-
-  const ballMesh = createBallMesh();
-  ballMesh.position.set(BALL_START.x, BALL_START.y, BALL_START.z);
-  scene.add(ballMesh);
-  const ballBody = world.createRigidBody(
-    RAPIER.RigidBodyDesc.dynamic()
-      .setTranslation(BALL_START.x, BALL_START.y, BALL_START.z)
-      .setLinearDamping(0.08)
-      .setAngularDamping(0.08),
-  );
-  world.createCollider(
-    RAPIER.ColliderDesc.ball(BOWLING_LANE_METERS.ballRadius).setDensity(7.0).setFriction(0.72).setRestitution(0.08),
-    ballBody,
-  );
-
-  const pins = getPinRackPositions().map((pin) => {
+  const pins: PinVisual[] = PIN_RACK.map((rack) => {
     const mesh = createPinMesh();
-    const start = { x: pin.x, y: PIN_CENTER_Y, z: pin.z };
-    mesh.position.set(start.x, start.y, start.z);
+    const start = new THREE.Vector3(rack.x, BOWLING_LANE_METERS.pinHeight / 2, rack.z);
+    mesh.position.copy(start);
     scene.add(mesh);
-    const body = world.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(start.x, start.y, start.z)
-        .setLinearDamping(0.18)
-        .setAngularDamping(0.12),
-    );
-    world.createCollider(
-      RAPIER.ColliderDesc.capsule(BOWLING_LANE_METERS.pinHeight * 0.38, BOWLING_LANE_METERS.pinRadius)
-        .setDensity(0.42)
-        .setFriction(0.58)
-        .setRestitution(0.28),
-      body,
-    );
-    return { body, mesh, start };
+    return {
+      id: rack.id,
+      mesh,
+      rack,
+      start,
+      fallProgress: 0,
+      fallSide: rack.x >= 0 ? 1 : -1,
+      standing: true,
+    };
   });
 
-  let currentShot: ShotInput | null = null;
   let animationFrame = 0;
-  let lastKnockedCount = -1;
-  let settledFrames = 0;
+  let currentRoll: RuntimeRoll | null = null;
 
   function sizeRenderer() {
     const width = Math.max(container.clientWidth, 1);
@@ -360,149 +331,83 @@ async function createBowlingRuntime(
   resizeObserver.observe(container);
   sizeRenderer();
 
-  function pinIsKnocked(pin: PinRuntime): boolean {
-    const rotation = pin.body.rotation();
-    const quaternion = new THREE.Quaternion(rotation.x, rotation.y, rotation.z, rotation.w);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quaternion);
-    const translation = pin.body.translation();
-    return up.y < 0.72 || translation.y < PIN_CENTER_Y * 0.72;
+  function resetBallPose() {
+    ball.position.copy(BALL_START);
+    ball.rotation.set(0, 0, 0);
   }
 
-  function updateMeshes() {
-    const ballTranslation = ballBody.translation();
-    const ballRotation = ballBody.rotation();
-    ballMesh.position.set(ballTranslation.x, ballTranslation.y, ballTranslation.z);
-    ballMesh.quaternion.set(ballRotation.x, ballRotation.y, ballRotation.z, ballRotation.w);
+  function animateRoll(now: number, roll: RuntimeRoll) {
+    const progress = clamp((now - roll.startedAt) / ROLL_DURATION_MS, 0, 1);
+    const travel = easeInOutCubic(progress);
+    const hook = Math.sin(progress * Math.PI) * roll.outcome.hookAmount * 1.15;
+    const x = roll.outcome.laneTargetX * travel + hook;
+    const z = BALL_START.z + (BOWLING_LANE_METERS.pinDeckZ - 0.25 - BALL_START.z) * travel;
 
-    for (const pin of pins) {
-      const translation = pin.body.translation();
-      const rotation = pin.body.rotation();
-      pin.mesh.position.set(translation.x, translation.y, translation.z);
-      pin.mesh.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
-    }
-  }
+    ball.position.set(x, BALL_START.y, z);
+    ball.rotation.x -= 0.16 + roll.shot.power * 0.18;
+    ball.rotation.y += roll.shot.spin * 0.045;
+    ball.rotation.z -= roll.shot.direction * 0.035;
 
-  function countKnockedPins(): number {
-    return pins.reduce((total, pin) => total + (pinIsKnocked(pin) ? 1 : 0), 0);
-  }
-
-  function animate() {
-    if (currentShot) {
-      const translation = ballBody.translation();
-      const progress = clamp((BALL_START.z - translation.z) / 18, 0, 1);
-      const hookForce = currentShot.spin * 0.52 * Math.pow(progress, 1.45);
-      ballBody.addForce({ x: hookForce, y: 0, z: 0 }, true);
-    }
-
-    world.step();
-    updateMeshes();
-
-    const knocked = countKnockedPins();
-    if (knocked !== lastKnockedCount) {
-      lastKnockedCount = knocked;
-      onKnockedPins(knocked);
-    }
-
-    const ballSpeed = ballBody.linvel();
-    const speed = Math.hypot(ballSpeed.x, ballSpeed.y, ballSpeed.z);
-    const ballZ = ballBody.translation().z;
-    if (currentShot && (speed < 0.12 || ballZ < -19.4)) {
-      settledFrames += 1;
-      if (settledFrames > 24) {
-        currentShot = null;
-        settledFrames = 0;
-        const finalKnocked = countKnockedPins();
-        onStatus("settled");
-        onShotSettled(finalKnocked);
+    if (progress > 0.64) {
+      const fallProgress = clamp((progress - 0.64) / 0.24, 0, 1);
+      const knocked = new Set(roll.outcome.knockedPinIds);
+      for (const pin of pins) {
+        if (!knocked.has(pin.id)) {
+          continue;
+        }
+        pin.standing = false;
+        pin.fallProgress = Math.max(pin.fallProgress, fallProgress);
+        poseFallenPin(pin, pin.fallProgress);
       }
-    } else {
-      settledFrames = 0;
+    }
+
+    if (progress >= 1 && !roll.settled) {
+      roll.settled = true;
+      currentRoll = null;
+      onStatus("settled");
+      onShotSettled(roll.outcome);
+    }
+  }
+
+  function animate(now: number) {
+    if (currentRoll) {
+      animateRoll(now, currentRoll);
     }
 
     renderer.render(scene, camera);
     animationFrame = window.requestAnimationFrame(animate);
   }
 
-  function resetBody(body: RAPIER.RigidBody, translation: { x: number; y: number; z: number }) {
-    body.setTranslation(translation, true);
-    body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
-    body.setLinvel({ x: 0, y: 0, z: 0 }, true);
-    body.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    body.wakeUp();
-  }
-
   function resetBall() {
-    currentShot = null;
-    lastKnockedCount = -1;
-    settledFrames = 0;
-    resetBody(ballBody, BALL_START);
-    updateMeshes();
-    onKnockedPins(countKnockedPins());
+    currentRoll = null;
+    resetBallPose();
     onStatus("ready");
   }
 
   function resetRack() {
-    currentShot = null;
-    lastKnockedCount = -1;
-    settledFrames = 0;
-    resetBody(ballBody, BALL_START);
+    currentRoll = null;
+    resetBallPose();
     for (const pin of pins) {
-      resetBody(pin.body, pin.start);
+      resetPin(pin);
     }
-    updateMeshes();
-    onKnockedPins(0);
     onStatus("ready");
   }
 
-  function reset() {
-    resetRack();
-  }
-
-  function launch(shot: ShotInput) {
-    resetBody(ballBody, BALL_START);
-    currentShot = shot;
-    settledFrames = 0;
-    ballBody.setLinvel(
-      {
-        x: shot.direction * 1.55,
-        y: 0,
-        z: -shot.releaseSpeed,
-      },
-      true,
-    );
-    ballBody.setAngvel(
-      {
-        x: -shot.releaseSpeed / BOWLING_LANE_METERS.ballRadius,
-        y: shot.spin * 9.5,
-        z: -shot.direction * 3.2,
-      },
-      true,
-    );
+  function launch(shot: ShotInput, outcome: ShotOutcome) {
+    resetBallPose();
+    currentRoll = {
+      shot,
+      outcome,
+      settled: false,
+      startedAt: performance.now(),
+    };
     onStatus("rolling");
   }
 
-  animate();
-  reset();
+  resetRack();
+  animate(performance.now());
 
   return {
-    camera,
-    renderer,
-    scene,
-    world,
-    ballBody,
-    ballMesh,
-    pins,
-    get animationFrame() {
-      return animationFrame;
-    },
-    set animationFrame(value: number) {
-      animationFrame = value;
-    },
-    resizeObserver,
-    launch,
-    resetBall,
-    resetRack,
-    reset,
     dispose: () => {
       window.cancelAnimationFrame(animationFrame);
       resizeObserver.disconnect();
@@ -510,6 +415,9 @@ async function createBowlingRuntime(
       woodTexture.dispose();
       renderer.dispose();
     },
+    launch,
+    resetBall,
+    resetRack,
   };
 }
 
@@ -518,7 +426,7 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const runtimeRef = useRef<BowlingRuntime | null>(null);
   const dragRef = useRef<DragState | null>(null);
-  const onShotSettledRef = useRef<(count: number) => void>(() => undefined);
+  const onShotSettledRef = useRef<(outcome: ShotOutcome) => void>(() => undefined);
   const completedSavedRef = useRef(false);
   const nextAutoResetRef = useRef<number | null>(null);
   const initialPlayerName = playerName?.trim() || "Invitado";
@@ -529,7 +437,9 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [preview, setPreview] = useState<ShotInput | null>(null);
   const [dragPoints, setDragPoints] = useState<SimulationPoint[]>([]);
+  const [standingPinIds, setStandingPinIds] = useState<string[]>(ALL_PIN_IDS);
   const sessionRef = useRef(session);
+  const standingPinIdsRef = useRef(standingPinIds);
 
   const clearAutoReset = useCallback(() => {
     if (nextAutoResetRef.current) {
@@ -541,6 +451,10 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
+
+  useEffect(() => {
+    standingPinIdsRef.current = standingPinIds;
+  }, [standingPinIds]);
 
   useEffect(() => {
     const cleanName = playerName?.trim();
@@ -555,10 +469,13 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
   }, [playerName]);
 
   const handleShotSettled = useCallback(
-    (count: number) => {
-      const result = recordGame3DShot(sessionRef.current, count);
+    (outcome: ShotOutcome) => {
+      const result = recordGame3DShot(sessionRef.current, outcome.knockedPinsTotal);
+      const remainingPins = standingPinIdsRef.current.filter((pinId) => !outcome.knockedPinIds.includes(pinId));
+
       sessionRef.current = result.session;
       setSession(result.session);
+      setStandingPinIds(remainingPins);
       setLastRoll(result.rollPins);
       setKnockedPins(result.knockedPinsTotal);
       setPreview(null);
@@ -574,10 +491,12 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
       }
 
       clearAutoReset();
-
       nextAutoResetRef.current = window.setTimeout(() => {
         if (result.resetRack) {
           runtimeRef.current?.resetRack();
+          standingPinIdsRef.current = ALL_PIN_IDS;
+          setStandingPinIds(ALL_PIN_IDS);
+          setKnockedPins(0);
         } else {
           runtimeRef.current?.resetBall();
         }
@@ -601,20 +520,19 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
     }
 
     setStatus("loading");
-    void createBowlingRuntime(
+    const runtime = createBowlingRuntime(
       container,
       canvas,
       setStatus,
-      setKnockedPins,
-      (count) => onShotSettledRef.current(count),
-    ).then((runtime) => {
-      if (cancelled) {
-        runtime.dispose();
-        return;
-      }
-      runtimeRef.current = runtime;
-      setStatus("ready");
-    });
+      (outcome) => onShotSettledRef.current(outcome),
+    );
+
+    if (cancelled) {
+      runtime.dispose();
+      return;
+    }
+
+    runtimeRef.current = runtime;
 
     return () => {
       cancelled = true;
@@ -627,7 +545,6 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
   const nextShot = useMemo(() => getGame3DNextShot(session), [session]);
   const totalScore = session.score.total;
   const frameLabel = nextShot.isComplete ? "Final" : `${nextShot.frameNumber}.${nextShot.rollNumber}`;
-  const frameGridClass = "grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-10";
 
   const statusLabel = useMemo(() => {
     switch (status) {
@@ -638,7 +555,7 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
       case "rolling":
         return "Rodando";
       case "settled":
-        return session.isComplete ? "Partida completa" : "Preparando siguiente tiro";
+        return session.isComplete ? "Partida completa" : "Preparando";
       default:
         return session.isComplete ? "Partida completa" : "Listo";
     }
@@ -673,6 +590,7 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
     if (!runtimeRef.current || session.isComplete || status !== "ready") {
       return;
     }
+
     event.currentTarget.setPointerCapture(event.pointerId);
     const point = eventPoint(event);
     dragRef.current = {
@@ -689,6 +607,7 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
     if (!drag || drag.pointerId !== event.pointerId) {
       return;
     }
+
     const point = eventPoint(event);
     const points = [...drag.points, point].slice(-16);
     dragRef.current = { ...drag, points };
@@ -701,6 +620,7 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
     if (!drag || drag.pointerId !== event.pointerId) {
       return;
     }
+
     event.currentTarget.releasePointerCapture(event.pointerId);
     const point = eventPoint(event);
     const points = [...drag.points, point];
@@ -729,22 +649,40 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
       return;
     }
 
+    const shotState = getGame3DNextShot(sessionRef.current);
+    const outcome = resolveShotOutcome({
+      shot,
+      previousKnockedPins: shotState.previousKnockedPins,
+      standingPinIds: standingPinIdsRef.current,
+    });
+
     setPreview(shot);
     clearAutoReset();
-    runtime.launch(shot);
+    runtime.launch(shot, outcome);
+  }
+
+  function cancelGesture() {
+    if (!dragRef.current) {
+      return;
+    }
+    dragRef.current = null;
+    setDragPoints([]);
+    setPreview(null);
+    setStatus(runtimeRef.current ? "ready" : "loading");
   }
 
   function resetGame() {
     clearAutoReset();
-
     const nextSession = createGame3DSession(playerName?.trim() || "Invitado");
     sessionRef.current = nextSession;
+    standingPinIdsRef.current = ALL_PIN_IDS;
     completedSavedRef.current = false;
     setSession(nextSession);
+    setStandingPinIds(ALL_PIN_IDS);
     setLastRoll(null);
     setSavedMessage(null);
     setKnockedPins(0);
-    runtimeRef.current?.reset();
+    runtimeRef.current?.resetRack();
     dragRef.current = null;
     setDragPoints([]);
     setPreview(null);
@@ -785,23 +723,14 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
 
       <div
         className="relative h-[68vh] min-h-[430px] touch-none select-none bg-black lg:h-[720px] lg:min-h-[620px]"
-        onPointerCancel={() => {
-          if (!dragRef.current) {
-            return;
-          }
-          dragRef.current = null;
-          setDragPoints([]);
-          setPreview(null);
-          setStatus(runtimeRef.current ? "ready" : "loading");
-        }}
+        onPointerCancel={cancelGesture}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         ref={containerRef}
       >
         <canvas aria-label="Pista de bowling 3D" className="block h-full w-full" ref={canvasRef} />
-
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_82%,rgba(34,211,238,0.18),transparent_24%),linear-gradient(180deg,rgba(0,0,0,0.08),rgba(0,0,0,0.42))]" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_82%,rgba(34,211,238,0.14),transparent_24%),linear-gradient(180deg,rgba(0,0,0,0.02),rgba(0,0,0,0.36))]" />
 
         {dragPoints.length > 0 && (
           <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full">
@@ -841,23 +770,23 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
         </div>
 
         <div className="pointer-events-none absolute bottom-4 left-4 right-4 hidden gap-2 sm:grid sm:grid-cols-4 lg:left-auto lg:w-[600px]">
-          <div className="rounded-lg border border-white/15 bg-black/65 p-2.5 backdrop-blur-md sm:p-3">
+          <div className="rounded-lg border border-white/15 bg-black/65 p-3 backdrop-blur-md">
             <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/45">Turno</p>
-            <p className="mt-1 text-base font-black text-white sm:text-lg">{session.playerName}</p>
+            <p className="mt-1 text-lg font-black text-white">{session.playerName}</p>
           </div>
-          <div className="rounded-lg border border-white/15 bg-black/65 p-2.5 backdrop-blur-md sm:p-3">
+          <div className="rounded-lg border border-white/15 bg-black/65 p-3 backdrop-blur-md">
             <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/45">Pinos</p>
-            <p className="mt-1 text-base font-black text-white sm:text-lg">
+            <p className="mt-1 text-lg font-black text-white">
               {knockedPins}/10 <span className="text-sm text-white/35">en pie {Math.max(0, 10 - knockedPins)}</span>
             </p>
           </div>
-          <div className="rounded-lg border border-white/15 bg-black/65 p-2.5 backdrop-blur-md sm:p-3">
+          <div className="rounded-lg border border-white/15 bg-black/65 p-3 backdrop-blur-md">
             <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/45">Última</p>
-            <p className="mt-1 text-base font-black text-white sm:text-lg">{lastRoll ?? "—"}</p>
+            <p className="mt-1 text-lg font-black text-white">{lastRoll ?? "—"}</p>
           </div>
-          <div className="rounded-lg border border-white/15 bg-black/65 p-2.5 backdrop-blur-md sm:p-3">
+          <div className="rounded-lg border border-white/15 bg-black/65 p-3 backdrop-blur-md">
             <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/45">Mejor</p>
-            <p className="mt-1 text-base font-black text-amber-200 sm:text-lg">{bestScore}</p>
+            <p className="mt-1 text-lg font-black text-amber-200">{bestScore}</p>
           </div>
         </div>
 
@@ -898,7 +827,7 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
           </div>
         </div>
 
-        <div className={frameGridClass}>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5 xl:grid-cols-10">
           {session.score.frames.map((frame) => (
             <FrameBox
               frame={frame}
