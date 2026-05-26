@@ -65,6 +65,7 @@ const BALL_START = {
 };
 
 const PIN_CENTER_Y = BOWLING_LANE_METERS.pinHeight / 2;
+const AUTO_RESET_DELAY_MS = 350;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -580,7 +581,8 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
         } else {
           runtimeRef.current?.resetBall();
         }
-      }, 900);
+        nextAutoResetRef.current = null;
+      }, AUTO_RESET_DELAY_MS);
     },
     [clearAutoReset, onGameComplete],
   );
@@ -784,6 +786,9 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
       <div
         className="relative h-[68vh] min-h-[430px] touch-none select-none bg-black lg:h-[720px] lg:min-h-[620px]"
         onPointerCancel={() => {
+          if (!dragRef.current) {
+            return;
+          }
           dragRef.current = null;
           setDragPoints([]);
           setPreview(null);
