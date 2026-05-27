@@ -22,7 +22,7 @@ Aplicación web moderna para calcular puntuaciones oficiales de bowling en parti
 - Estadísticas: mejor puntuación, media, partidas, strikes, spares y porcentajes.
 - Estadísticas avanzadas por jugador y forma reciente.
 - Torneos locales todos contra todos con clasificación.
-- Juego 3D con pista procedural, bola, pinos animados, tiro por drag/swipe y partida oficial de 10 frames.
+- Juego 3D con pista procedural, bola, pinos animados, cámara dinámica, lanzamiento pull-back y partida oficial de 10 frames.
 - Club online con Supabase: perfiles, ranking de amigos, temporadas e invitaciones.
 - Sincronización manual de partidas del juego 3D hacia el ranking online.
 - Sección educativa “Cómo se puntúa”.
@@ -100,9 +100,9 @@ La capa online vive en:
 
 La V8 monta el producto principal: un juego de bowling 3D desde la foul line. La escena vive en [components/BowlingGame3D.tsx](/Users/seryio/Desktop/Bowling/components/BowlingGame3D.tsx) y usa Three.js para renderizar la pista, la bola y los pinos.
 
-La versión actual mantiene una sesión oficial de 10 frames, calcula el marcador acumulado en tiempo real, reinicia bola o rack según corresponda y guarda automáticamente la partida completada en el historial local como resultado `game3d`. La animación visual es determinista y estable: el render no decide la puntuación, solo presenta lo que la capa pura de juego ya resolvió. La lógica de la sesión vive en [lib/game/bowling-game-session.ts](/Users/seryio/Desktop/Bowling/lib/game/bowling-game-session.ts), con tests en [tests/bowling-game-session.test.ts](/Users/seryio/Desktop/Bowling/tests/bowling-game-session.test.ts).
+La versión actual mantiene una sesión oficial de 10 frames, calcula el marcador acumulado en tiempo real, reinicia bola o rack según corresponda y guarda automáticamente la partida completada en el historial local como resultado `game3d`. La cámara avanza siguiendo la bola durante el tiro y vuelve a la foul line antes del siguiente lanzamiento. La animación visual es determinista y estable: el render no decide la puntuación, solo presenta lo que la capa pura de juego ya resolvió. La lógica de la sesión vive en [lib/game/bowling-game-session.ts](/Users/seryio/Desktop/Bowling/lib/game/bowling-game-session.ts), con tests en [tests/bowling-game-session.test.ts](/Users/seryio/Desktop/Bowling/tests/bowling-game-session.test.ts).
 
-La lógica pura de geometría del rack, lectura del gesto y resolución de pinos derribados vive en [lib/game/bowling-simulation.ts](/Users/seryio/Desktop/Bowling/lib/game/bowling-simulation.ts), con tests en [tests/bowling-simulation.test.ts](/Users/seryio/Desktop/Bowling/tests/bowling-simulation.test.ts). La calculadora manual queda como herramienta extra para partidas reales presenciales.
+La lógica pura de geometría del rack, lectura del gesto pull-back y resolución de pinos derribados vive en [lib/game/bowling-simulation.ts](/Users/seryio/Desktop/Bowling/lib/game/bowling-simulation.ts), con tests en [tests/bowling-simulation.test.ts](/Users/seryio/Desktop/Bowling/tests/bowling-simulation.test.ts). La calculadora manual queda como herramienta extra para partidas reales presenciales.
 
 El ranking online se alimenta únicamente de partidas generadas por el juego 3D. Las partidas introducidas manualmente en la calculadora no suben al ranking del Club.
 

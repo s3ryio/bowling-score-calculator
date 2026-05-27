@@ -66,6 +66,8 @@ const ALL_PIN_IDS = PIN_RACK.map((pin) => pin.id);
 const ROLL_DURATION_MS = 1850;
 const AUTO_RESET_DELAY_MS = 520;
 const BALL_START = new THREE.Vector3(0, BOWLING_LANE_METERS.ballRadius, 0.35);
+const CAMERA_HOME_POSITION = new THREE.Vector3(0, 1.3, 4.25);
+const CAMERA_HOME_TARGET = new THREE.Vector3(0, 0.19, -10.2);
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -220,8 +222,8 @@ function createBowlingRuntime(
   scene.fog = new THREE.Fog("#03050a", 10, 28);
 
   const camera = new THREE.PerspectiveCamera(48, 1, 0.01, 60);
-  camera.position.set(0, 1.3, 4.25);
-  camera.lookAt(0, 0.19, -10.2);
+  camera.position.copy(CAMERA_HOME_POSITION);
+  camera.lookAt(CAMERA_HOME_TARGET);
 
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -336,6 +338,27 @@ function createBowlingRuntime(
     ball.rotation.set(0, 0, 0);
   }
 
+  function resetCameraPose() {
+    camera.position.copy(CAMERA_HOME_POSITION);
+    camera.lookAt(CAMERA_HOME_TARGET);
+  }
+
+  function updateCameraFollow(progress: number) {
+    const followPosition = new THREE.Vector3(
+      ball.position.x * 0.38,
+      1.24 + progress * 0.26,
+      clamp(ball.position.z + 4.2 - progress * 0.95, -12.6, CAMERA_HOME_POSITION.z),
+    );
+    const lookAt = new THREE.Vector3(
+      ball.position.x * 0.52,
+      0.2 + progress * 0.08,
+      clamp(ball.position.z - 4.2, BOWLING_LANE_METERS.pinDeckZ - 0.7, -2.8),
+    );
+
+    camera.position.lerp(followPosition, 0.16);
+    camera.lookAt(lookAt);
+  }
+
   function animateRoll(now: number, roll: RuntimeRoll) {
     const progress = clamp((now - roll.startedAt) / ROLL_DURATION_MS, 0, 1);
     const travel = easeInOutCubic(progress);
@@ -347,6 +370,7 @@ function createBowlingRuntime(
     ball.rotation.x -= 0.16 + roll.shot.power * 0.18;
     ball.rotation.y += roll.shot.spin * 0.045;
     ball.rotation.z -= roll.shot.direction * 0.035;
+    updateCameraFollow(progress);
 
     if (progress > 0.64) {
       const fallProgress = clamp((progress - 0.64) / 0.24, 0, 1);
@@ -381,12 +405,14 @@ function createBowlingRuntime(
   function resetBall() {
     currentRoll = null;
     resetBallPose();
+    resetCameraPose();
     onStatus("ready");
   }
 
   function resetRack() {
     currentRoll = null;
     resetBallPose();
+    resetCameraPose();
     for (const pin of pins) {
       resetPin(pin);
     }
@@ -395,6 +421,7 @@ function createBowlingRuntime(
 
   function launch(shot: ShotInput, outcome: ShotOutcome) {
     resetBallPose();
+    resetCameraPose();
     currentRoll = {
       shot,
       outcome,
@@ -689,6 +716,20 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
   }
 
   const pathData = dragPoints.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`).join(" ");
+  const aimGuide = useMemo(() => {
+    const origin = dragPoints[0];
+    if (!origin || !preview) {
+      return null;
+    }
+
+    const length = 92 + preview.power * 172;
+    return {
+      x1: origin.x,
+      y1: origin.y,
+      x2: origin.x + preview.direction * 132,
+      y2: origin.y - length,
+    };
+  }, [dragPoints, preview]);
 
   return (
     <section className="game-3d-panel overflow-hidden rounded-lg border border-white/10 bg-[#03050a]">
@@ -734,7 +775,20 @@ export function BowlingGame3D({ bestScore = 0, onGameComplete, playerName }: Bow
 
         {dragPoints.length > 0 && (
           <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full">
-            <path d={pathData} fill="none" stroke="rgba(103, 232, 249, 0.8)" strokeLinecap="round" strokeWidth="4" />
+            {aimGuide && (
+              <>
+                <path
+                  d={`M ${aimGuide.x1} ${aimGuide.y1} L ${aimGuide.x2} ${aimGuide.y2}`}
+                  fill="none"
+                  stroke="rgba(250, 204, 21, 0.88)"
+                  strokeDasharray="9 8"
+                  strokeLinecap="round"
+                  strokeWidth="4"
+                />
+                <circle cx={aimGuide.x2} cy={aimGuide.y2} fill="rgba(250, 204, 21, 0.92)" r="6" />
+              </>
+            )}
+            <path d={pathData} fill="none" stroke="rgba(103, 232, 249, 0.82)" strokeLinecap="round" strokeWidth="4" />
             {dragPoints[0] && (
               <circle cx={dragPoints[0].x} cy={dragPoints[0].y} fill="rgba(255,255,255,0.9)" r="5" />
             )}

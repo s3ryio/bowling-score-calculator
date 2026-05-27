@@ -35,6 +35,38 @@ describe("bowling 3D simulation helpers", () => {
     expect(shot?.power).toBeLessThanOrEqual(1);
   });
 
+  test("maps a pull-back release to a powered centered shot", () => {
+    const shot = deriveShotFromGesture({
+      points: [
+        { x: 180, y: 450, t: 0 },
+        { x: 180, y: 620, t: 360 },
+      ],
+      viewport: { width: 360, height: 720 },
+    });
+
+    expect(shot).toMatchObject({
+      direction: 0,
+      spin: 0,
+    });
+    expect(shot?.power).toBeGreaterThan(0.45);
+    expect(shot?.releaseSpeed).toBeGreaterThan(7);
+  });
+
+  test("uses pull-back horizontal offset for aim and spin", () => {
+    const shot = deriveShotFromGesture({
+      points: [
+        { x: 180, y: 450, t: 0 },
+        { x: 235, y: 520, t: 150 },
+        { x: 255, y: 650, t: 360 },
+      ],
+      viewport: { width: 360, height: 720 },
+    });
+
+    expect(shot?.direction).toBeGreaterThan(0.2);
+    expect(shot?.spin).toBeGreaterThan(0.05);
+    expect(shot?.power).toBeGreaterThan(0.55);
+  });
+
   test("uses horizontal aim and gesture curve for direction and spin", () => {
     const shot = deriveShotFromGesture({
       points: [

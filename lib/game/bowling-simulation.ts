@@ -89,24 +89,29 @@ export function deriveShotFromGesture(input: {
   const first = input.points[0];
   const last = input.points[input.points.length - 1];
   const dx = last.x - first.x;
-  const dy = first.y - last.y;
-  const distance = Math.hypot(dx, dy);
+  const forwardDy = first.y - last.y;
+  const pullBackDy = last.y - first.y;
+  const isPullBack = pullBackDy > Math.abs(dx) * 0.65 && pullBackDy > 0;
+  const activeDy = isPullBack ? pullBackDy : forwardDy;
+  const distance = Math.hypot(dx, activeDy);
   const minDistance = Math.min(input.viewport.width, input.viewport.height) * 0.08;
 
-  if (dy <= 0 || distance < minDistance) {
+  if (activeDy <= 0 || distance < minDistance) {
     return null;
   }
 
   const durationSeconds = Math.max((last.t - first.t) / 1000, 0.08);
-  const distancePower = distance / (input.viewport.height * 0.42);
+  const powerWindow = isPullBack ? 0.34 : 0.42;
+  const distancePower = distance / (input.viewport.height * powerWindow);
   const speedPower = distance / durationSeconds / 900;
-  const power = clamp(distancePower * 0.72 + speedPower * 0.28, 0.12, 1);
-  const direction = clamp(dx / (input.viewport.width * 0.32), -1, 1);
+  const power = clamp(distancePower * 0.76 + speedPower * 0.24, 0.12, 1);
+  const directionWindow = isPullBack ? 0.38 : 0.32;
+  const direction = clamp(dx / (input.viewport.width * directionWindow), -1, 1);
 
   const midpoint = input.points[Math.floor(input.points.length / 2)] ?? first;
   const expectedMidX = first.x + dx * 0.5;
   const curve = midpoint.x - expectedMidX;
-  const spin = clamp(curve / (input.viewport.width * 0.22) + direction * 0.18, -1, 1);
+  const spin = clamp(curve / (input.viewport.width * 0.22) + direction * (isPullBack ? 0.12 : 0.18), -1, 1);
 
   return {
     direction: Math.abs(direction) < 0.01 ? 0 : Number(direction.toFixed(3)),
